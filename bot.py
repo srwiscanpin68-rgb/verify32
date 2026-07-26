@@ -1,0 +1,156 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+import asyncio
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- การตั้งค่าบอท ---
+TOKEN = os.getenv("TOKEN")  # ใส่ Token ของบอทที่นี่
+ADMIN_USER_ID = 1284107691723067454 # ใส่ ID ของแอดมิน (ตัวเลข)
+ADMIN_USER_ID = 1434326648982863922 # ใส่ ID ของแอดมิน (ตัวเลข)
+LOG_CHANNEL_ID = 1529416449267859567  # ช่องลับสำหรับแอดมิน
+VERIFIED_ROLE_ID = 1465361475035201762  # ID ของยศที่จะให้เมื่อผ่าน
+IMAGE_URL = "https://cdn.discordapp.com/attachments/1529416449267859567/1530830006534537256/image.png?ex=6a67000b&is=6a65ae8b&hm=11ca199cc05a03507fac9ed75273ff81ae668a9b5d45b4c6ae22c4b701692963&"  # ใส่ลิงก์รูปภาพที่ต้องการแสดง
+
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# --- Modals ---
+
+class QuestionnaireModal(discord.ui.Modal, title='ตอบไม่งั้นพ่อมึงตาย'):
+    roblox_name = discord.ui.TextInput(label='ชื่อใน Roblox', placeholder='...')
+    dept = discord.ui.TextInput(label='มึงมาจากกรมไร', placeholder='...')
+    unit = discord.ui.TextInput(label='มึงอยู่หน่วยอะไรจากรมนั้น', placeholder='...')
+    rebel = discord.ui.TextInput(label='กฏบพ่องตาย', placeholder='...', style=discord.TextStyle.long)
+
+    def __init__(self, user):
+        super().__init__()
+        self.user = user
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.send_message("รอนะไอโง่", ephemeral=True)
+        
+        # ส่งข้อมูลไปที่ช่องแอดมิน
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            embed = discord.Embed(title="📝 มีการขอเข้ากลุ่มใหม่", color=discord.Color.blue())
+            embed.add_field(name="ผู้สมัคร", value=f"{self.user.mention} ({self.user.id})", inline=False)
+            embed.add_field(name="ชื่อ Roblox", value=self.roblox_name.value, inline=True)
+            embed.add_field(name="กรม", value=self.dept.value, inline=True)
+            embed.add_field(name="หน่วย", value=self.unit.value, inline=True)
+            embed.add_field(name="สถานะกบฏ", value=self.rebel.value, inline=False)
+            
+            view = AdminReviewView(self.user, self.roblox_name.value)
+            await log_channel.send(content=f"<@{ADMIN_USER_ID}>  รีบๆตอบดิไอโง่ปัญญาอ่อน", embed=embed, view=view)
+
+# --- Views ---
+
+class AdminReviewView(discord.ui.View):
+    def __init__(self, target_user, roblox_name):
+        super().__init__(timeout=None)
+        self.target_user = target_user
+        self.roblox_name = roblox_name
+
+    @discord.ui.button(label="รับ (Accept)", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # ตรวจสอบว่าเป็นแอดมินหรือไม่
+        if interaction.user.id != ADMIN_USER_ID:
+            return await interaction.response.send_message("คุณไม่มีสิทธิ์กดปุ่มนี้!", ephemeral=True)
+
+        role = interaction.guild.get_role(VERIFIED_ROLE_ID)
+        if role:
+            try:
+                await self.target_user.add_roles(role)
+                # เปลี่ยนชื่อเล่น (Optional: ถ้าต้องการ)
+                # await self.target_user.edit(nick=f"[Verified] {self.roblox_name}")
+                await interaction.response.send_message(f"รับ {self.target_user.mention} เข้ากลุ่มแล้ว!", ephemeral=False)
+                
+                # แจ้งเตือนผู้ใช้
+                try:
+                    await self.target_user.send(f"ยินดีด้วย! คุณได้รับการอนุมัติเข้ากลุ่มแล้วในเซิร์ฟเวอร์ {interaction.guild.name}")
+                except:
+                    pass
+                
+                # ปิดการใช้งานปุ่ม
+                for child in self.children:
+                    child.disabled = True
+                await interaction.message.edit(view=self)
+            except Exception as e:
+                await interaction.response.send_message(f"เกิดข้อผิดพลาด: {e}", ephemeral=True)
+        else:
+            await interaction.response.send_message("ไม่พบยศที่ตั้งค่าไว้!", ephemeral=True)
+
+    @discord.ui.button(label="ไม่รับ (Reject)", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != ADMIN_USER_ID:
+            return await interaction.response.send_message("คุณไม่มีสิทธิ์กดปุ่มนี้!", ephemeral=True)
+
+        try:
+            await self.target_user.kick(reason="ไม่ผ่านการยืนยันตัวตน")
+            await interaction.response.send_message(f"เตะ {self.target_user.mention} ออกจากเซิร์ฟเวอร์แล้ว", ephemeral=False)
+            
+            # ปิดการใช้งานปุ่ม
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+        except Exception as e:
+            await interaction.response.send_message(f"เกิดข้อผิดพลาดในการเตะ: {e}", ephemeral=True)
+
+class ReadyCheckView(discord.ui.View):
+    def __init__(self, user):
+        super().__init__(timeout=60)
+        self.user = user
+
+    @discord.ui.button(label="พร้อม", style=discord.ButtonStyle.primary)
+    async def ready(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("ไม่ใช่คิวของคุณ!", ephemeral=True)
+        
+        await interaction.response.send_modal(QuestionnaireModal(self.user))
+
+    @discord.ui.button(label="ไม่พร้อม", style=discord.ButtonStyle.secondary)
+    async def not_ready(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user.id:
+            return await interaction.response.send_message("ไม่ใช่คิวของคุณ!", ephemeral=True)
+        
+        await interaction.response.send_message("เมื่อคุณพร้อม สามารถกดปุ่มยืนยันตัวตนใหม่ได้ทุกเมื่อ", ephemeral=True)
+
+class InitialVerifyView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="กดตรงนี้ครับไอปัญญาอ่อน", style=discord.ButtonStyle.success, emoji="✅")
+    async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = ReadyCheckView(interaction.user)
+        await interaction.response.send_message("พร้อมที่จะเข้าดิสกูไหม?", view=view, ephemeral=True)
+
+# --- Commands ---
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    print('------')
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setup_verify(ctx):
+    """คำสั่งสำหรับวางปุ่มยืนยันตัวตนในช่องที่ต้องการ"""
+    embed = discord.Embed(
+        title="ยืนยันตัวตนครับไอควาย",
+        description="กดปุ่ด้านล่างครับไอหน้าหี",
+        color=discord.Color.green()
+    )
+    if IMAGE_URL and IMAGE_URL != "https://example.com/your_image.png":
+        embed.set_image(url=IMAGE_URL)
+    
+    view = InitialVerifyView()
+    await ctx.send(embed=embed, view=view)
+    await ctx.message.delete()
+
+bot.run(TOKEN)
