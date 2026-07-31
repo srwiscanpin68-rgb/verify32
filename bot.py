@@ -7,9 +7,9 @@ import os
 # --- การตั้งค่าบอท ---
 # แนะนำให้ใส่ใน Railway Environment Variables เพื่อความปลอดภัย
 TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_IDS = [1284107691723067454, 1434326648982863922] # รายชื่อ ID แอดมิน
-LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', '1529416449267859567'))
-VERIFIED_ROLE_ID = int(os.getenv('VERIFIED_ROLE_ID', '1465361475035201762'))
+ADMIN_IDS = [1284107691723067454] # รายชื่อ ID แอดมิน
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', '1532801908949909604'))
+VERIFIED_ROLE_ID = int(os.getenv('VERIFIED_ROLE_ID', '1532801945981423847'))
 IMAGE_URL = "https://cdn.discordapp.com/attachments/1529416449267859567/1530830006534537256/image.png?ex=6a67000b&is=6a65ae8b&hm=11ca199cc05a03507fac9ed75273ff81ae668a9b5d45b4c6ae22c4b701692963&"
 
 intents = discord.Intents.default()
