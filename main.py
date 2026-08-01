@@ -62,15 +62,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# --- ทางเข้าสำหรับเช็คลิงก์ ---
 @app.get("/")
-async def root(): return {"status": "บอทออนไลน์แล้ว", "check_verify": "ลองเปิดลิงก์ /verify ในเบราว์เซอร์ดู"}
+async def root(): return {"status": "online"}
 
-@app.get("/verify")
-async def check_verify(): return {"status": "ห้อง /verify พร้อมรับข้อมูลจาก Roblox แล้ว (POST ONLY)"}
-
-# --- ทางเข้าหลักสำหรับ Roblox ---
+# --- รับได้ทั้ง /verify และ /roblox/verify เพื่อกันพลาด ---
 @app.post("/verify")
+@app.post("/roblox/verify")
 async def verify_endpoint(request: Request):
     data = await request.json()
     rid, rname = data.get("robloxId"), data.get("robloxUsername")
