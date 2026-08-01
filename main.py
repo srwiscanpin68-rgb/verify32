@@ -18,11 +18,11 @@ def init_db():
 
 def update_pending(discord_id, username):
     conn = sqlite3.connect(DB_PATH)
-    # เก็บชื่อแบบตัวพิมพ์เล็กทั้งหมดเพื่อการค้นหาที่ง่ายขึ้น
-    clean_name = username.strip().lower()
+    # ลบเว้นวรรคและทำให้เป็นตัวพิมพ์เล็กก่อนบันทึก
+    clean_name = str(username).strip().lower()
     conn.execute("INSERT OR REPLACE INTO users (discord_id, pending_roblox_username, verified) VALUES (?, ?, 0)", (str(discord_id), clean_name))
     conn.commit(); conn.close()
-    print(f"[DEBUG] บอทจดจำชื่อรอการยืนยัน: {clean_name}")
+    print(f"[DEBUG] บันทึกชื่อลงฐานข้อมูลแล้ว: '{clean_name}'")
 
 intents = discord.Intents.default()
 intents.members = True
@@ -50,11 +50,33 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
                 nick_prefix = "| OF-3, MAJ | OF-4, LTC | OF-5, COL | OF-6, SRCOL | OF-7, PMG | OF-8, MG | OF-9, GEN"
                 roles_to_add.append(guild.get_role(RANK_ROLES["OF_HIGH"]))
             nick = f"{nick_prefix} {roblox_username}"
+            rank_name = group_info["role"]["name"]
         else: nick = f"Guest | {roblox_username}"
         await member.edit(roles=[r for r in roles_to_add if r], nick=nick[:32])
         return rank_val, member.display_name, rank_name
     except Exception as e:
-        print(f"Error updating member: {e}"); return None, None, None
+        print(f"Error: {e}"); return None, None, None
+
+class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Roblox'):
+    username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='ตัวอย่าง: 8II7V3', required=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        update_pending(interaction.user.id, self.username.value)
+        await interaction.response.send_message(f"บันทึกชื่อ **{self.username.value}** แล้ว! กรุณากดปุ่มใน Roblox อีกครั้ง", ephemeral=True)
+
+class VerifyView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label='ยืนยันตัวตน', style=discord.ButtonStyle.success, custom_id='start_v')
+    async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(VerifyModal())
+
+@bot.event
+async def on_ready():
+    bot.add_view(VerifyView())
+    print(f'Bot {bot.user} Ready!')
+
+@bot.command()
+async def setup_verify(ctx):
+    await ctx.send(embed=discord.Embed(title="ระบบยืนยันตัวตน", description="กดปุ่มเพื่อเริ่มยืนยันตัวตน", color=0x00ff00), view=VerifyView())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -65,32 +87,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.get("/")
-async def root(): return {"status": "online"}
-
 @app.post("/verify")
 async def verify_endpoint(request: Request):
     data = await request.json()
-    rid, rname = data.get("robloxId"), data.get("robloxUsername")
-    search_name = str(rname).strip().lower()
+    rid, rname = data.get("robloxId"), str(data.get("robloxUsername", "")).strip()
+    search_name = rname.lower()
     
-    print(f"[DEBUG] กำลังตรวจสอบชื่อจาก Roblox: {search_name}")
+    print(f"[DEBUG] กำลังค้นหาชื่อใน DB: '{search_name}'")
     
     conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (search_name,)).fetchone()
+    # ค้นหาแบบไม่สนเว้นวรรค
+    row = conn.execute("SELECT discord_id FROM users WHERE LOWER(TRIM(pending_roblox_username)) = ?", (search_name,)).fetchone()
     conn.close()
     
     if not row:
-        return {"ok": False, "message": f"ไม่พบชื่อ '{rname}' ในรายการรอ (ตรวจสอบการสะกดชื่อใน Discord อีกครั้ง)"}
+        return {"ok": False, "message": f"ไม่พบชื่อ '{rname}' ในรายการรอ"}
     
     rank, d_name, r_name = await update_member_status(row["discord_id"], rid, rname)
     if rank is not None:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(rid), rname, row["discord_id"]))
-        conn.commit(); conn.close()
         return {"ok": True, "discord_username": d_name, "current_rank": r_name}
-    
-    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (ตรวจสอบสิทธิ์บอทใน Discord)"}
+    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
