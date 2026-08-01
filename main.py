@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 ROBLOX_GROUP_ID = 35646818
+ROBLOX_GROUP_URL = "https://www.roblox.com/groups/35646818"
+ROBLOX_MAP_URL = "https://www.roblox.com/th/games/78189317414125/By"
 VERIFIED_ROLE_ID = 1532801945981423847
 RANK_ROLES = {"OR": 1532804608777523200, "OF_LOW": 1532804655375978646, "OF_HIGH": 1532806100611629076}
 DB_PATH = "database.db"
@@ -15,11 +17,6 @@ DB_PATH = "database.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER DEFAULT 0, pending_roblox_username TEXT)")
-    conn.commit(); conn.close()
-
-def clear_all_data():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM users")
     conn.commit(); conn.close()
 
 def update_pending(discord_id, username):
@@ -38,24 +35,40 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Clean setup slash commands synced for {self.user}")
+        print(f"Advanced v3 slash commands synced for {self.user}")
 
 bot = MyBot()
+
+def get_roblox_id_by_name(username):
+    try:
+        resp = requests.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [username], "excludeBannedUsers": True}).json()
+        if resp.get("data") and len(resp["data"]) > 0:
+            return resp["data"][0]["id"]
+    except Exception as e:
+        print(f"Error fetching Roblox ID: {e}")
+    return None
+
+def check_group_membership(roblox_id):
+    try:
+        resp = requests.get(f"https://groups.roblox.com/v1/users/{roblox_id}/groups/roles").json()
+        for group in resp.get("data", []):
+            if group["group"]["id"] == ROBLOX_GROUP_ID:
+                return True, group["role"]["rank"], group["role"]["name"]
+    except Exception as e:
+        print(f"Error checking group membership: {e}")
+    return False, 0, None
 
 async def update_member_status(discord_id, roblox_id, roblox_username):
     if not bot.guilds: return None, None, None
     guild = bot.guilds[0]
     try:
         member = await guild.fetch_member(int(discord_id))
-        resp = requests.get(f"https://groups.roblox.com/v1/users/{roblox_id}/groups/roles").json()
-        group_info = next((g for g in resp["data"] if g["group"]["id"] == ROBLOX_GROUP_ID), None)
+        is_in_group, rank_val, rank_name = check_group_membership(roblox_id)
         
         roles_to_add = [guild.get_role(VERIFIED_ROLE_ID)]
-        rank_val, rank_name, nick_prefix = 0, "ทหารไทย", ""
+        nick_prefix = ""
         
-        if group_info:
-            rank_val = group_info["role"]["rank"]
-            rank_name = group_info["role"]["name"]
+        if is_in_group:
             if 1 <= rank_val <= 7:
                 nick_prefix = "| OR-1, PC | OR-2, PEC | OR-3, CPL | OR-4, SGT | OR-5 SSG | OR-6/OR-7, SFC | OR-8/OR-9, MSG"
                 roles_to_add.append(guild.get_role(RANK_ROLES["OR"]))
@@ -80,8 +93,33 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
 class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Roblox'):
     username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='พิมพ์ชื่อของคุณที่นี่...', min_length=3, max_length=20, required=True)
     async def on_submit(self, interaction: discord.Interaction):
-        update_pending(interaction.user.id, self.username.value)
-        await interaction.response.send_message(f"บันทึกชื่อ **{self.username.value}** แล้ว! กรุณากดปุ่มใน Roblox อีกครั้ง", ephemeral=True)
+        input_name = self.username.value
+        roblox_id = get_roblox_id_by_name(input_name)
+        
+        if not roblox_id:
+            await interaction.response.send_message(f"❌ ไม่พบชื่อ Roblox: **{input_name}** กรุณาตรวจสอบการสะกดชื่ออีกครั้ง", ephemeral=True)
+            return
+
+        is_in_group, _, _ = check_group_membership(roblox_id)
+        
+        if not is_in_group:
+            # แจ้งเตือนในหน้าต่าง และส่ง DM
+            embed_error = discord.Embed(title="❌ กรุณาเข้ากลุ่ม Roblox", description=f"คุณยังไม่ได้เข้ากลุ่มของเรา! บอทได้ส่งลิงก์กลุ่มไปให้คุณทาง DM แล้วครับ\n\n**ลิงก์กลุ่ม:** [คลิกที่นี่เพื่อเข้ากลุ่ม]({ROBLOX_GROUP_URL})", color=0xff0000)
+            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            
+            try:
+                await interaction.user.send(f"สวัสดีครับ! คุณยังไม่ได้เข้ากลุ่ม Roblox ของเรา กรุณาเข้ากลุ่มที่ลิงก์นี้ก่อนยืนยันตัวตนนะครับ: {ROBLOX_GROUP_URL}")
+            except:
+                pass # กรณีผู้ใช้ปิด DM
+            return
+
+        # ถ้าเข้ากลุ่มแล้ว บันทึกข้อมูลและแจ้งให้เข้าแมพ
+        update_pending(interaction.user.id, input_name)
+        embed_success = discord.Embed(title="กรุณาเข้าแมพเพื่อยืนยันตัวตน", color=0x00ff00)
+        embed_success.add_field(name="Username", value=f"**{input_name}**", inline=False)
+        embed_success.add_field(name="Map", value=f"[คลิกที่นี่เพื่อเข้าเกม]({ROBLOX_MAP_URL})", inline=False)
+        embed_success.set_footer(text="❤️❤️❤️")
+        await interaction.response.send_message(embed=embed_success, ephemeral=True)
 
 class VerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -94,17 +132,13 @@ class VerifyView(discord.ui.View):
 @app_commands.default_permissions(administrator=True)
 async def setup_verify(interaction: discord.Interaction):
     embed = discord.Embed(title="ระบบยืนยันตัวตนทหารไทย", description="กรุณากดปุ่มด้านล่างเพื่อเริ่มการยืนยันตัวตนกับ Roblox", color=0x2b2d31)
-    
-    # ส่งข้อความเข้าห้องโดยตรง (จะไม่ขึ้นว่าใครใช้คำสั่ง)
     await interaction.channel.send(embed=embed, view=VerifyView())
-    
-    # ตอบกลับ Admin แบบส่วนตัว (คนอื่นมองไม่เห็น) เพื่อให้คำสั่งสมบูรณ์
-    await interaction.response.send_message("✅ ตั้งค่าระบบยืนยันตัวตนเรียบร้อยแล้ว (ข้อความถูกส่งแบบสะอาด)", ephemeral=True)
+    await interaction.response.send_message("✅ ตั้งค่าระบบยืนยันตัวตนเรียบร้อยแล้ว", ephemeral=True)
 
 @bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน")
 @app_commands.default_permissions(administrator=True)
 async def reset_db(interaction: discord.Interaction):
-    clear_all_data()
+    conn = sqlite3.connect(DB_PATH); conn.execute("DELETE FROM users"); conn.commit(); conn.close()
     await interaction.response.send_message("⚠️ [Admin] ล้างฐานข้อมูลทั้งหมดเรียบร้อยแล้ว ทุกคนต้องยืนยันใหม่!", ephemeral=True)
 
 # --- FASTAPI SETUP ---
