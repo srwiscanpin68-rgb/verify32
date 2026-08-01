@@ -8,119 +8,171 @@ from fastapi import FastAPI, Request
 import uvicorn
 from contextlib import asynccontextmanager
 
-# --- ตั้งค่า ---
-TOKEN = os.getenv("DISCORD_TOKEN", "ใส่_TOKEN_ของคุณที่นี่")
-GROUP_ID = 35646818
-ROLE_VERIFIED = 1532801945981423847
-ROLE_OR = 1532804608777523200
-ROLE_OF_LOW = 1532804655375978646
-ROLE_OF_HIGH = 1532806100611629076
+# ==========================================================
+# ⚙️ CONFIGURATION (ใส่ Token ใน Railway Variables)
+# ==========================================================
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "ใส่_TOKEN_ของคุณที่นี่")
+PORT = int(os.getenv("PORT", 8888))
 
-RANK_NAMES = {
-    1: "PC", 2: "PEC", 3: "CPL", 4: "SGT", 5: "SSG", 6: "SFC", 7: "MSG",
-    8: "CADET", 9: "LTP", 10: "1LT", 11: "CPT", 12: "MAJ", 13: "LTC",
-    14: "COL", 15: "SRCOL", 16: "PMG", 17: "MG", 18: "GEN"
+ROBLOX_GROUP_ID = 35646818
+VERIFIED_ROLE_ID = 1532801945981423847
+
+# Rank Mapping ตามความต้องการ
+RANK_ROLES = {
+    "OR": 1532804608777523200,    # OR-1 ถึง OR-9
+    "OF_LOW": 1532804655375978646, # OF-1A ถึง OF-2
+    "OF_HIGH": 1532806100611629076 # OF-3 ถึง OF-9
 }
 
-# --- Database ---
+VERIFIED_EMOJI = ":__~242:"
+DB_PATH = "database.db"
+
+# ==========================================================
+# 🗄️ DATABASE
+# ==========================================================
 def init_db():
-    conn = sqlite3.connect("data.db")
-    conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER, pending TEXT)")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER DEFAULT 0, pending_roblox_username TEXT)")
     conn.commit()
     conn.close()
 
-def get_user(did):
-    conn = sqlite3.connect("data.db")
-    conn.row_factory = sqlite3.Row
-    res = conn.execute("SELECT * FROM users WHERE discord_id = ?", (str(did),)).fetchone()
-    conn.close()
-    return res
+def get_user(discord_id):
+    conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM users WHERE discord_id = ?", (str(discord_id),)).fetchone()
+    conn.close(); return row
 
-# --- Discord Bot ---
+def update_pending(discord_id, username):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT OR REPLACE INTO users (discord_id, pending_roblox_username, verified) VALUES (?, ?, 0)", (str(discord_id), username))
+    conn.commit(); conn.close()
+
+def verify_user_db(roblox_id, roblox_username):
+    conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (roblox_username,)).fetchone()
+    if row:
+        did = row['discord_id']
+        conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(roblox_id), roblox_username, did))
+        conn.commit(); conn.close(); return did
+    conn.close(); return None
+
+# ==========================================================
+# 🤖 DISCORD BOT
+# ==========================================================
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+async def update_member_status(discord_id, roblox_id, roblox_username):
+    if not bot.guilds: return None
+    guild = bot.guilds[0]
+    try:
+        member = await guild.fetch_member(int(discord_id))
+        resp = requests.get(f"https://groups.roblox.com/v1/users/{roblox_id}/groups/roles" ).json()
+        group_info = next((g for g in resp['data'] if g['group']['id'] == ROBLOX_GROUP_ID), None)
+        
+        roles_to_add = [guild.get_role(VERIFIED_ROLE_ID)]
+        rank_val = 0
+        nick_prefix = ""
+        
+        if group_info:
+            rank_val = group_info['role']['rank']
+            # กำหนด Prefix และ Role ตาม Rank ID
+            if 1 <= rank_val <= 7: # OR-1 to OR-9
+                nick_prefix = "| OR-1, PC | OR-2, PEC | OR-3, CPL | OR-4, SGT | OR-5 SSG | OR-6/OR-7, SFC | OR-8/OR-9, MSG"
+                roles_to_add.append(guild.get_role(RANK_ROLES["OR"]))
+            elif 8 <= rank_val <= 11: # OF-1A to OF-2
+                nick_prefix = "| OF-1A, LTP | OF-1B, 1LT | OF-2, CPT"
+                roles_to_add.append(guild.get_role(RANK_ROLES["OF_LOW"]))
+            elif 12 <= rank_val <= 18: # OF-3 to OF-9
+                nick_prefix = "| OF-3, MAJ | OF-4, LTC | OF-5, COL | OF-6, SRCOL | OF-7, PMG | OF-8, MG | OF-9, GEN"
+                roles_to_add.append(guild.get_role(RANK_ROLES["OF_HIGH"]))
+            
+            nick = f"{nick_prefix} {roblox_username}"
+        else:
+            nick = f"Guest | {roblox_username}"
+
+        await member.edit(roles=[r for r in roles_to_add if r], nick=nick[:32])
+        return rank_val
+    except Exception as e:
+        print(f"Update Error: {e}")
+        return None
+
+class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Roblox'):
+    username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='ตัวอย่าง: manpop79', required=True)
+    async def on_submit(self, interaction: discord.Interaction):
+        update_pending(interaction.user.id, self.username.value)
+        embed = discord.Embed(color=discord.Color.gold())
+        embed.add_field(name="ชื่อ:", value=self.username.value, inline=True)
+        embed.add_field(name="เข้าแมพ:", value="รอแปปเย่ดแม่", inline=True)
+        embed.description = "กรุณาเข้าแมพ Roblox และพิมพ์ในช่องแชทว่า `ยืนยันตัวตน`"
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class ReVerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label='อัพเดทยศ', style=discord.ButtonStyle.success, custom_id='upd')
-    async def upd(self, it, btn):
-        await it.response.send_message("กำลังอัพเดท...", ephemeral=True)
-        u = get_user(it.user.id)
-        if u: await update_roles(it.user.id, u['roblox_id'], u['roblox_username'])
-        await it.edit_original_response(content="อัพเดทเรียบร้อย!")
+    
+    @discord.ui.button(label='เปลี่ยน Account', style=discord.ButtonStyle.primary, custom_id='change_acc')
+    async def change_acc(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(VerifyModal())
+
+    @discord.ui.button(label='อัพเดทยศ', style=discord.ButtonStyle.success, custom_id='upd_rank')
+    async def upd_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("กำลังอัพเดทยศรอสักครู่...", ephemeral=True)
+        u = get_user(interaction.user.id)
+        if u:
+            rank_val = await update_member_status(interaction.user.id, u['roblox_id'], u['roblox_username'])
+            embed = discord.Embed(color=discord.Color.green())
+            embed.description = f"{VERIFIED_EMOJI} Role ของคุณเป็นปัจจุบันแล้ว\n\n**ข้อมูลปัจจุบัน:**\nRoblox: {u['roblox_username']}\nRoblox ID: {u['roblox_id']}\nRank: {rank_val}\nสถานะ: {VERIFIED_EMOJI} ยืนยันแล้ว"
+            await interaction.edit_original_response(content=None, embed=embed)
+        else:
+            await interaction.edit_original_response(content="ไม่พบข้อมูลของคุณ")
 
 class VerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
-    @discord.ui.button(label='ยืนยันตัวตน', style=discord.ButtonStyle.success, custom_id='vbtn')
-    async def vbtn(self, it, btn):
-        u = get_user(it.user.id)
+    
+    @discord.ui.button(label='ยืนยันตัวตน', style=discord.ButtonStyle.success, emoji='✅', custom_id='start_v')
+    async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
+        u = get_user(interaction.user.id)
         if u and u['verified']:
-            await it.response.send_message(f"ยืนยันแล้ว: {u['roblox_username']}", view=ReVerifyView(), ephemeral=True)
+            embed = discord.Embed(title="#พบข้อมูล Roblox Account อยู่แล้ว", color=discord.Color.blue())
+            embed.description = f"Roblox: {u['roblox_username']}\nRoblox ID: {u['roblox_id']}\nสถานะ {VERIFIED_EMOJI} ยืนยันแล้ว\n\nต้องการเปลี่ยน Account? กดปุ่มด้านล่าง"
+            await interaction.response.send_message(embed=embed, view=ReVerifyView(), ephemeral=True)
         else:
-            class M(discord.ui.Modal, title='ใส่ชื่อ Roblox'):
-                n = discord.ui.TextInput(label='ชื่อ Roblox')
-                async def on_submit(self, it2):
-                    conn = sqlite3.connect("data.db")
-                    conn.execute("INSERT OR REPLACE INTO users (discord_id, pending, verified) VALUES (?, ?, 0)", (str(it2.user.id), self.n.value))
-                    conn.commit(); conn.close()
-                    await it2.response.send_message(f"พิมพ์ `ยืนยันตัวตน` ในแมพ Roblox", ephemeral=True)
-            await it.response.send_modal(M())
+            await interaction.response.send_modal(VerifyModal())
 
 @bot.event
 async def on_ready():
     bot.add_view(VerifyView()); bot.add_view(ReVerifyView())
-    print(f"Bot {bot.user} Online!")
+    print(f'Bot {bot.user} Ready!')
 
 @bot.command()
+@commands.has_permissions(administrator=True)
 async def setup_verify(ctx):
-    await ctx.send("กดปุ่มเพื่อยืนยันตัวตน", view=VerifyView())
+    await ctx.send(embed=discord.Embed(title="ระบบยืนยันตัวตน", description="กรุณากดปุ่มด้านล่างเพื่อเริ่มการยืนยันตัวตนกับ Roblox", color=discord.Color.green()), view=VerifyView())
 
-# --- API ---
+# ==========================================================
+# 🌐 FASTAPI & API
+# ==========================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    asyncio.create_task(bot.start(TOKEN))
+    asyncio.create_task(bot.start(DISCORD_TOKEN))
     yield
     await bot.close()
 
 app = FastAPI(lifespan=lifespan)
 
-@app.post("/verify")
-async def verify(req: Request):
-    d = await req.json()
-    rid, rname = d.get("robloxId"), d.get("robloxUsername")
-    conn = sqlite3.connect("data.db")
-    conn.row_factory = sqlite3.Row
-    u = conn.execute("SELECT discord_id FROM users WHERE pending = ?", (rname,)).fetchone()
-    if u:
-        did = u["discord_id"]
-        conn.execute("UPDATE users SET roblox_id=?, roblox_username=?, verified=1, pending=NULL WHERE discord_id=?", (rid, rname, did))
-        conn.commit(); conn.close()
-        asyncio.create_task(update_roles(did, rid, rname))
-        return {"success": True}
-    conn.close(); return {"success": False}
-
-async def update_roles(did, rid, rname):
-    try:
-        guild = bot.guilds[0]
-        m = await guild.fetch_member(int(did))
-        res = requests.get(f"https://groups.roblox.com/v1/users/{rid}/groups/roles" ).json()
-        g = next((x for x in res["data"] if x["group"]["id"] == GROUP_ID), None)
-        ids = [ROLE_VERIFIED]
-        nick = f"Guest | {rname}"
-        if g:
-            rv = g["role"]["rank"]
-            nick = f"{RANK_NAMES.get(rv, 'Guest')} | {rname}"
-            if 1 <= rv <= 7: ids.append(ROLE_OR)
-            elif 8 <= rv <= 11: ids.append(ROLE_OF_LOW)
-            elif 12 <= rv <= 18: ids.append(ROLE_OF_HIGH)
-        await m.edit(roles=[guild.get_role(x) for x in ids if guild.get_role(x)], nick=nick[:32])
-    except: pass
-
 @app.get("/")
-async def h(): return {"s": "ok"}
+async def root(): return {"status": "online"}
+
+@app.post("/verify")
+async def verify_endpoint(request: Request):
+    data = await request.json()
+    did = verify_user_db(data.get("robloxId"), data.get("robloxUsername"))
+    if did:
+        asyncio.create_task(update_member_status(did, data.get("robloxId"), data.get("robloxUsername")))
+        return {"success": True}
+    return {"success": False}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
