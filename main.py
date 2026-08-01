@@ -21,7 +21,6 @@ def clear_all_data():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DELETE FROM users")
     conn.commit(); conn.close()
-    print("[SYSTEM] Admin cleared all data.")
 
 def update_pending(discord_id, username):
     conn = sqlite3.connect(DB_PATH)
@@ -39,7 +38,7 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Admin-only slash commands synced for {self.user}")
+        print(f"Clean setup slash commands synced for {self.user}")
 
 bot = MyBot()
 
@@ -82,7 +81,7 @@ class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Rob
     username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='พิมพ์ชื่อของคุณที่นี่...', min_length=3, max_length=20, required=True)
     async def on_submit(self, interaction: discord.Interaction):
         update_pending(interaction.user.id, self.username.value)
-        await interaction.response.send_message(f"บันทึกข้อมูลสำเร็จ! กรุณากดปุ่มใน Roblox เพื่อยืนยันบัญชี **{self.username.value}**", ephemeral=True)
+        await interaction.response.send_message(f"บันทึกชื่อ **{self.username.value}** แล้ว! กรุณากดปุ่มใน Roblox อีกครั้ง", ephemeral=True)
 
 class VerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -90,17 +89,20 @@ class VerifyView(discord.ui.View):
     async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(VerifyModal())
 
-# --- ADMIN-ONLY SLASH COMMANDS ---
-@bot.tree.command(name="ยืนยันตัวตน", description="ตั้งค่าระบบยืนยันตัวตน (Administrator Only)")
-@app_commands.default_permissions(administrator=True) # จำกัดสิทธิ์ Admin
-@app_commands.checks.has_permissions(administrator=True)
+# --- CLEAN SLASH COMMANDS ---
+@bot.tree.command(name="ยืนยันตัวตน", description="ตั้งค่าระบบยืนยันตัวตน (แบบไม่แสดงชื่อคนพิมพ์)")
+@app_commands.default_permissions(administrator=True)
 async def setup_verify(interaction: discord.Interaction):
     embed = discord.Embed(title="ระบบยืนยันตัวตนทหารไทย", description="กรุณากดปุ่มด้านล่างเพื่อเริ่มการยืนยันตัวตนกับ Roblox", color=0x2b2d31)
-    await interaction.response.send_message(embed=embed, view=VerifyView())
+    
+    # ส่งข้อความเข้าห้องโดยตรง (จะไม่ขึ้นว่าใครใช้คำสั่ง)
+    await interaction.channel.send(embed=embed, view=VerifyView())
+    
+    # ตอบกลับ Admin แบบส่วนตัว (คนอื่นมองไม่เห็น) เพื่อให้คำสั่งสมบูรณ์
+    await interaction.response.send_message("✅ ตั้งค่าระบบยืนยันตัวตนเรียบร้อยแล้ว (ข้อความถูกส่งแบบสะอาด)", ephemeral=True)
 
-@bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน (Administrator Only)")
-@app_commands.default_permissions(administrator=True) # จำกัดสิทธิ์ Admin
-@app_commands.checks.has_permissions(administrator=True)
+@bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน")
+@app_commands.default_permissions(administrator=True)
 async def reset_db(interaction: discord.Interaction):
     clear_all_data()
     await interaction.response.send_message("⚠️ [Admin] ล้างฐานข้อมูลทั้งหมดเรียบร้อยแล้ว ทุกคนต้องยืนยันใหม่!", ephemeral=True)
