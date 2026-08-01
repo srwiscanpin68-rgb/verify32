@@ -69,6 +69,9 @@ async def root(): return {"status": "บอทออนไลน์แล้ว"
 @app.get("/verify")
 async def check_verify(): return {"status": "ห้อง /verify พร้อมรับข้อมูลจาก Roblox แล้ว (POST ONLY)"}
 
+@app.get("/roblox/verify")
+async def check_roblox_verify(): return {"status": "ห้อง /roblox/verify พร้อมรับข้อมูลจาก Roblox แล้ว (POST ONLY)"}
+
 # --- ทางเข้าหลักสำหรับ Roblox ---
 @app.post("/verify")
 async def verify_endpoint(request: Request):
@@ -86,5 +89,22 @@ async def verify_endpoint(request: Request):
         return {"ok": True, "discord_username": d_name, "current_rank": r_name}
     return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (เช็คสิทธิ์บอทในดิส)"}
 
+@app.post("/roblox/verify")
+async def roblox_verify_endpoint(request: Request):
+    data = await request.json()
+    rid, rname = data.get("robloxId"), data.get("robloxUsername")
+    conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (rname,)).fetchone()
+    conn.close()
+    if not row: return {"ok": False, "message": "ไม่พบชื่อ Roblox นี้ในรายการรอ (พิมพ์ !setup_verify ในดิสก่อน)"}
+    rank, d_name, r_name = await update_member_status(row["discord_id"], rid, rname)
+    if rank is not None:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(rid), rname, row["discord_id"]))
+        conn.commit(); conn.close()
+        return {"ok": True, "discord_username": d_name, "current_rank": r_name}
+    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (เช็คสิทธิ์บอทในดิส)"}
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
