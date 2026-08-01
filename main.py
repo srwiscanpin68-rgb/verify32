@@ -6,11 +6,14 @@ import discord
 from discord.ext import commands
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
+import uvicorn
 
 # ==========================================================
 # ⚙️ CONFIGURATION
 # ==========================================================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "ใส่_TOKEN_ของคุณที่นี่")
+PORT = int(os.getenv("PORT", 8888))
+
 ROBLOX_GROUP_ID = 35646818
 VERIFIED_ROLE_ID = 1532801945981423847
 
@@ -32,14 +35,11 @@ RANK_NAMES = {
 VERIFIED_EMOJI = ":__~242:"
 DB_PATH = "database.db"
 
-# ==========================================================
-# 🗄️ DATABASE
-# ==========================================================
+# --- Database ---
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER DEFAULT 0, pending_roblox_username TEXT)")
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def get_user(discord_id):
     conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
@@ -60,9 +60,7 @@ def verify_user_db(roblox_id, roblox_username):
         conn.commit(); conn.close(); return did
     conn.close(); return None
 
-# ==========================================================
-# 🤖 DISCORD BOT
-# ==========================================================
+# --- Bot ---
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -84,13 +82,7 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
             elif rv in RANK_MAPPING['OF_LOW_RANKS']: roles.append(guild.get_role(RANK_MAPPING['OF_LOW_ROLE_ID']))
             elif rv in RANK_MAPPING['OF_HIGH_RANKS']: roles.append(guild.get_role(RANK_MAPPING['OF_HIGH_ROLE_ID']))
         await member.edit(roles=[r for r in roles if r], nick=f"{rank_name} | {roblox_username}"[:32])
-    except Exception as e: print(f"Update Error: {e}")
-
-class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Roblox'):
-    username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='ตัวอย่าง: manpop79', required=True)
-    async def on_submit(self, interaction: discord.Interaction):
-        update_pending(interaction.user.id, self.username.value)
-        await interaction.response.send_message(embed=discord.Embed(title="ข้อมูลการยืนยันตัวตน", description=f"ชื่อ: **{self.username.value}**\nกรุณาเข้าแมพ Roblox และพิมพ์ว่า `ยืนยันตัวตน`", color=discord.Color.gold()), ephemeral=True)
+    except Exception as e: print(f"Error: {e}")
 
 class VerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -100,14 +92,27 @@ class VerifyView(discord.ui.View):
         if u and u['verified']:
             emb = discord.Embed(title="#พบข้อมูล Roblox Account อยู่แล้ว", color=discord.Color.blue())
             emb.add_field(name="Roblox:", value=u['roblox_username'], inline=True)
-            emb.add_field(name="สถานะ:", value=f"{VERIFIED_EMOJI} ยืนยันแล้ว", inline=False)
             await interaction.response.send_message(embed=emb, view=ReVerifyView(), ephemeral=True)
-        else: await interaction.response.send_modal(VerifyModal())
+        else:
+            modal = discord.ui.Modal(title='ยืนยันตัวตน Roblox')
+            name_input = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='ตัวอย่าง: manpop79', required=True)
+            async def on_submit(it: discord.Interaction):
+                update_pending(it.user.id, name_input.value)
+                await it.response.send_message(f"ชื่อ: {name_input.value}\nกรุณาเข้าแมพ Roblox และพิมพ์ว่า `ยืนยันตัวตน`", ephemeral=True)
+            modal.on_submit = on_submit
+            await interaction.response.send_modal(modal)
 
 class ReVerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
     @discord.ui.button(label='เปลี่ยน Account', style=discord.ButtonStyle.primary, custom_id='change_account')
-    async def change_account(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_modal(VerifyModal())
+    async def change_account(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = discord.ui.Modal(title='เปลี่ยนบัญชี Roblox')
+        name_input = discord.ui.TextInput(label='ใส่ชื่อใหม่ใน Roblox', required=True)
+        async def on_submit(it: discord.Interaction):
+            update_pending(it.user.id, name_input.value)
+            await it.response.send_message(f"เปลี่ยนเป็นชื่อ: {name_input.value}\nกรุณาเข้าแมพใหม่เพื่อยืนยัน", ephemeral=True)
+        modal.on_submit = on_submit
+        await interaction.response.send_modal(modal)
     @discord.ui.button(label='อัพเดทยศ', style=discord.ButtonStyle.success, custom_id='update_rank')
     async def update_rank(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("กำลังอัพเดทยศ...", ephemeral=True)
@@ -125,9 +130,7 @@ async def on_ready():
 async def setup_verify(ctx):
     await ctx.send(embed=discord.Embed(title="ระบบยืนยันตัวตน", description="กดปุ่มด้านล่างเพื่อเริ่ม", color=discord.Color.green()), view=VerifyView())
 
-# ==========================================================
-# 🌐 FASTAPI & LIFESPAN
-# ==========================================================
+# --- FastAPI ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -138,7 +141,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
-async def root(): return {"status": "running"}
+async def root(): return {"status": "online"}
 
 @app.post("/verify")
 async def verify_endpoint(request: Request):
@@ -150,5 +153,4 @@ async def verify_endpoint(request: Request):
     return {"success": False}
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8888)))
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, log_level="info")
