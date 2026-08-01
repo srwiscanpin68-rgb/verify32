@@ -4,7 +4,7 @@ import sqlite3
 import requests
 import discord
 from discord.ext import commands
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, Header
 import uvicorn
 from contextlib import asynccontextmanager
 
@@ -93,10 +93,10 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
             nick = f"Guest | {roblox_username}"
 
         await member.edit(roles=[r for r in roles_to_add if r], nick=nick[:32])
-        return rank_val
+        return rank_val, member.display_name
     except Exception as e:
         print(f"Update Error: {e}")
-        return None
+        return None, None
 
 class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Roblox'):
     username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='ตัวอย่าง: manpop79', required=True)
@@ -120,7 +120,7 @@ class ReVerifyView(discord.ui.View):
         await interaction.response.send_message("กำลังอัพเดทยศรอสักครู่...", ephemeral=True)
         u = get_user(interaction.user.id)
         if u:
-            rank_val = await update_member_status(interaction.user.id, u['roblox_id'], u['roblox_username'])
+            rank_val, discord_display_name = await update_member_status(interaction.user.id, u['roblox_id'], u['roblox_username'])
             embed = discord.Embed(color=discord.Color.green())
             embed.description = f"{VERIFIED_EMOJI} Role ของคุณเป็นปัจจุบันแล้ว\n\n**ข้อมูลปัจจุบัน:**\nRoblox: {u['roblox_username']}\nRoblox ID: {u['roblox_id']}\nRank: {rank_val}\nสถานะ: {VERIFIED_EMOJI} ยืนยันแล้ว"
             await interaction.edit_original_response(content=None, embed=embed)
@@ -153,6 +153,10 @@ async def setup_verify(ctx):
 # ==========================================================
 # 🌐 FASTAPI & API
 # ==========================================================
+
+# Add your API key for Roblox verification
+ROBLOX_VERIFICATION_API_KEY = os.getenv("ROBLOX_VERIFICATION_API_KEY")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -166,13 +170,65 @@ app = FastAPI(lifespan=lifespan)
 async def root(): return {"status": "online"}
 
 @app.post("/verify")
-async def verify_endpoint(request: Request):
+async def verify_endpoint(request: Request, x_roblox_verification_key: str = Header(None)):
+    if not ROBLOX_VERIFICATION_API_KEY or x_roblox_verification_key != ROBLOX_VERIFICATION_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+
     data = await request.json()
-    did = verify_user_db(data.get("robloxId"), data.get("robloxUsername"))
-    if did:
-        asyncio.create_task(update_member_status(did, data.get("robloxId"), data.get("robloxUsername")))
-        return {"success": True}
-    return {"success": False}
+    roblox_id = data.get("robloxId")
+    roblox_username = data.get("robloxUsername")
+    selected_division = data.get("selected_division") # New field from Roblox
+
+    if not roblox_id or not roblox_username or not selected_division:
+        raise HTTPException(status_code=400, detail="Missing robloxId, robloxUsername, or selected_division")
+
+    # Find the Discord user associated with this Roblox username (pending verification)
+    conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
+    user_row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (roblox_username,)).fetchone()
+    conn.close()
+
+    if not user_row:
+        return {"ok": False, "message": "ไม่พบผู้ใช้ Discord ที่รอการยืนยันด้วยชื่อ Roblox นี้"}
+
+    discord_id = user_row['discord_id']
+
+    # Verify the user and update their status in Discord
+    rank_val, discord_display_name = await update_member_status(discord_id, roblox_id, roblox_username)
+
+    if rank_val is None:
+        return {"ok": False, "message": "ไม่สามารถอัปเดตสถานะ Discord ได้"}
+
+    # Check if the selected division matches the assigned roles/rank
+    # This is a simplified check. You might need more complex logic here
+    # based on your specific rank mapping and division requirements.
+    is_verified_for_division = False
+    if selected_division == "army" and 1 <= rank_val <= 7: # OR-1 to OR-9
+        is_verified_for_division = True
+    elif selected_division == "police" and 8 <= rank_val <= 11: # OF-1A to OF-2
+        is_verified_for_division = True
+    elif selected_division == "air_force" and 12 <= rank_val <= 18: # OF-3 to OF-9
+        is_verified_for_division = True
+
+    if not is_verified_for_division:
+        return {"ok": False, "message": "คุณไม่มีสิทธิ์ในหน่วยงานที่เลือก หรือยศไม่ตรงกัน"}
+
+    # If all checks pass, update the database as verified
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(roblox_id), roblox_username, discord_id))
+    conn.commit(); conn.close()
+
+    # Determine current rank display name for Roblox
+    current_rank_display = ""
+    if 1 <= rank_val <= 7:
+        current_rank_display = "ทหารไทย"
+    elif 8 <= rank_val <= 11:
+        current_rank_display = "ตำรวจไทย"
+    elif 12 <= rank_val <= 18:
+        current_rank_display = "ทหารอากาศไทย"
+    else:
+        current_rank_display = "ไม่ทราบยศ"
+
+    return {"ok": True, "discord_username": discord_display_name, "current_rank": current_rank_display}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
