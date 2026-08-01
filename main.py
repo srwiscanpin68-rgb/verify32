@@ -18,8 +18,11 @@ def init_db():
 
 def update_pending(discord_id, username):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT OR REPLACE INTO users (discord_id, pending_roblox_username, verified) VALUES (?, ?, 0)", (str(discord_id), username))
+    # เก็บชื่อแบบตัวพิมพ์เล็กทั้งหมดเพื่อการค้นหาที่ง่ายขึ้น
+    clean_name = username.strip().lower()
+    conn.execute("INSERT OR REPLACE INTO users (discord_id, pending_roblox_username, verified) VALUES (?, ?, 0)", (str(discord_id), clean_name))
     conn.commit(); conn.close()
+    print(f"[DEBUG] บอทจดจำชื่อรอการยืนยัน: {clean_name}")
 
 intents = discord.Intents.default()
 intents.members = True
@@ -51,7 +54,7 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
         await member.edit(roles=[r for r in roles_to_add if r], nick=nick[:32])
         return rank_val, member.display_name, rank_name
     except Exception as e:
-        print(f"Error: {e}"); return None, None, None
+        print(f"Error updating member: {e}"); return None, None, None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -65,23 +68,29 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root(): return {"status": "online"}
 
-# --- รับได้ทั้ง /verify และ /roblox/verify เพื่อกันพลาด ---
 @app.post("/verify")
-@app.post("/roblox/verify")
 async def verify_endpoint(request: Request):
     data = await request.json()
     rid, rname = data.get("robloxId"), data.get("robloxUsername")
+    search_name = str(rname).strip().lower()
+    
+    print(f"[DEBUG] กำลังตรวจสอบชื่อจาก Roblox: {search_name}")
+    
     conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (rname,)).fetchone()
+    row = conn.execute("SELECT discord_id FROM users WHERE pending_roblox_username = ?", (search_name,)).fetchone()
     conn.close()
-    if not row: return {"ok": False, "message": "ไม่พบชื่อ Roblox นี้ในรายการรอ (พิมพ์ !setup_verify ในดิสก่อน)"}
+    
+    if not row:
+        return {"ok": False, "message": f"ไม่พบชื่อ '{rname}' ในรายการรอ (ตรวจสอบการสะกดชื่อใน Discord อีกครั้ง)"}
+    
     rank, d_name, r_name = await update_member_status(row["discord_id"], rid, rname)
     if rank is not None:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(rid), rname, row["discord_id"]))
         conn.commit(); conn.close()
         return {"ok": True, "discord_username": d_name, "current_rank": r_name}
-    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (เช็คสิทธิ์บอทในดิส)"}
+    
+    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (ตรวจสอบสิทธิ์บอทใน Discord)"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
