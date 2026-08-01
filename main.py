@@ -21,7 +21,7 @@ def clear_all_data():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("DELETE FROM users")
     conn.commit(); conn.close()
-    print("[SYSTEM] ล้างฐานข้อมูลทั้งหมดเรียบร้อยแล้ว")
+    print("[SYSTEM] Admin cleared all data.")
 
 def update_pending(discord_id, username):
     conn = sqlite3.connect(DB_PATH)
@@ -38,9 +38,8 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # ลงทะเบียน Slash Commands
         await self.tree.sync()
-        print(f"Synced slash commands for {self.user}")
+        print(f"Admin-only slash commands synced for {self.user}")
 
 bot = MyBot()
 
@@ -71,7 +70,6 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
         else:
             nick = f"Guest | {roblox_username}"
 
-        # กรอง Role ที่มีค่าจริงเท่านั้น
         roles = [r for r in roles_to_add if r is not None]
         await member.edit(roles=roles, nick=nick[:32])
         return rank_val, member.display_name, rank_name
@@ -84,8 +82,7 @@ class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Rob
     username = discord.ui.TextInput(label='ใส่ชื่อใน Roblox', placeholder='พิมพ์ชื่อของคุณที่นี่...', min_length=3, max_length=20, required=True)
     async def on_submit(self, interaction: discord.Interaction):
         update_pending(interaction.user.id, self.username.value)
-        embed = discord.Embed(title="บันทึกข้อมูลสำเร็จ", description=f"ชื่อ Roblox: **{self.username.value}**\n\nกรุณาเข้าแมพ Roblox และกดปุ่มยืนยันตัวตนในเกม", color=0x00ff00)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(f"บันทึกข้อมูลสำเร็จ! กรุณากดปุ่มใน Roblox เพื่อยืนยันบัญชี **{self.username.value}**", ephemeral=True)
 
 class VerifyView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -93,18 +90,20 @@ class VerifyView(discord.ui.View):
     async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(VerifyModal())
 
-# --- SLASH COMMANDS ---
-@bot.tree.command(name="ยืนยันตัวตน", description="ตั้งค่าระบบยืนยันตัวตน (สำหรับ Admin)")
-@app_commands.default_permissions(administrator=True)
+# --- ADMIN-ONLY SLASH COMMANDS ---
+@bot.tree.command(name="ยืนยันตัวตน", description="ตั้งค่าระบบยืนยันตัวตน (Administrator Only)")
+@app_commands.default_permissions(administrator=True) # จำกัดสิทธิ์ Admin
+@app_commands.checks.has_permissions(administrator=True)
 async def setup_verify(interaction: discord.Interaction):
     embed = discord.Embed(title="ระบบยืนยันตัวตนทหารไทย", description="กรุณากดปุ่มด้านล่างเพื่อเริ่มการยืนยันตัวตนกับ Roblox", color=0x2b2d31)
     await interaction.response.send_message(embed=embed, view=VerifyView())
 
-@bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน (สำหรับ Admin)")
-@app_commands.default_permissions(administrator=True)
+@bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="ลบข้อมูลการยืนยันตัวตนทุกคน (Administrator Only)")
+@app_commands.default_permissions(administrator=True) # จำกัดสิทธิ์ Admin
+@app_commands.checks.has_permissions(administrator=True)
 async def reset_db(interaction: discord.Interaction):
     clear_all_data()
-    await interaction.response.send_message("⚠️ ล้างฐานข้อมูลการยืนยันตัวตนทั้งหมดเรียบร้อยแล้ว ทุกคนต้องยืนยันใหม่!", ephemeral=True)
+    await interaction.response.send_message("⚠️ [Admin] ล้างฐานข้อมูลทั้งหมดเรียบร้อยแล้ว ทุกคนต้องยืนยันใหม่!", ephemeral=True)
 
 # --- FASTAPI SETUP ---
 @asynccontextmanager
@@ -136,7 +135,7 @@ async def verify_endpoint(request: Request):
         conn.commit(); conn.close()
         return {"ok": True, "discord_username": d_name, "current_rank": r_name}
     
-    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ (โปรดตรวจสอบตำแหน่งยศของบอท)"}
+    return {"ok": False, "message": "บอทไม่มีสิทธิ์เปลี่ยนยศ"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
