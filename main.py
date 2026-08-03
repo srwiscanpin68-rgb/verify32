@@ -11,9 +11,14 @@ ROBLOX_GROUP_ID = 226834839
 ROBLOX_GROUP_URL = "https://www.roblox.com/groups/226834839"
 ROBLOX_MAP_URL = "https://www.roblox.com/th/games/78189317414125/By"
 VERIFIED_ROLE_ID = 1479443343367995579
+DEV_ROLE_ID = 1479469155399766129 # ยศพิเศษสำหรับ Developer
 RANK_ROLES = {"OR": 1479699133001629797, "OF_LOW": 1479699314078122094, "OF_HIGH": 1479699471603470432}
 DB_PATH = "database.db"
 VERIFIED_EMOJI = "✅"
+
+# --- DEVELOPER IDS ---
+# ใส่ Roblox ID ของ Developer ที่นี่ (แยกด้วยเครื่องหมายคอมม่า)
+DEVELOPER_IDS = [5711452462] # <-- เปลี่ยนเป็น ID ของคุณ
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -41,7 +46,7 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Full System v4 slash commands synced for {self.user}")
+        print(f"Dev System v5 slash commands synced for {self.user}")
 
 bot = MyBot()
 
@@ -74,23 +79,30 @@ async def update_member_status(discord_id, roblox_id, roblox_username):
         roles_to_add = [guild.get_role(VERIFIED_ROLE_ID)]
         nick_prefix = ""
         
-        if is_in_group:
-            if 1 <= rank_val <= 7:
-                nick_prefix = "| OR-1, PC | OR-2, PEC | OR-3, CPL | OR-4, SGT | OR-5 SSG | OR-6/OR-7, SFC | OR-8/OR-9, MSG"
-                roles_to_add.append(guild.get_role(RANK_ROLES["OR"]))
-            elif 8 <= rank_val <= 11:
-                nick_prefix = "| OF-1A, LTP | OF-1B, 1LT | OF-2, CPT"
-                roles_to_add.append(guild.get_role(RANK_ROLES["OF_LOW"]))
-            elif 12 <= rank_val <= 18:
-                nick_prefix = "| OF-3, MAJ | OF-4, LTC | OF-5, COL | OF-6, SRCOL | OF-7, PMG | OF-8, MG | OF-9, GEN"
-                roles_to_add.append(guild.get_role(RANK_ROLES["OF_HIGH"]))
-            nick = f"{nick_prefix} {roblox_username}"
+        # --- DEV CHECK ---
+        is_dev = int(roblox_id) in DEVELOPER_IDS
+        if is_dev:
+            roles_to_add.append(guild.get_role(DEV_ROLE_ID))
+            nick = f"Dev | {roblox_username}"
+            rank_name = "Developer"
         else:
-            nick = f"Guest | {roblox_username}"
+            if is_in_group:
+                if 1 <= rank_val <= 7:
+                    nick_prefix = "| OR-1, PC | OR-2, PEC | OR-3, CPL | OR-4, SGT | OR-5 SSG | OR-6/OR-7, SFC | OR-8/OR-9, MSG"
+                    roles_to_add.append(guild.get_role(RANK_ROLES["OR"]))
+                elif 8 <= rank_val <= 11:
+                    nick_prefix = "| OF-1A, LTP | OF-1B, 1LT | OF-2, CPT"
+                    roles_to_add.append(guild.get_role(RANK_ROLES["OF_LOW"]))
+                elif 12 <= rank_val <= 18:
+                    nick_prefix = "| OF-3, MAJ | OF-4, LTC | OF-5, COL | OF-6, SRCOL | OF-7, PMG | OF-8, MG | OF-9, GEN"
+                    roles_to_add.append(guild.get_role(RANK_ROLES["OF_HIGH"]))
+                nick = f"{nick_prefix} {roblox_username}"
+            else:
+                nick = f"Guest | {roblox_username}"
 
         roles = [r for r in roles_to_add if r is not None]
         await member.edit(roles=roles, nick=nick[:32])
-        return rank_val, member.display_name, rank_name
+        return rank_val if not is_dev else 999, member.display_name, rank_name
     except Exception as e:
         print(f"Update Error: {e}")
         return None, None, None
@@ -106,8 +118,11 @@ class VerifyModal(discord.ui.Modal, title='ยืนยันตัวตน Rob
             await interaction.response.send_message(f"❌ ไม่พบชื่อ Roblox: **{input_name}** กรุณาตรวจสอบการสะกดชื่ออีกครั้ง", ephemeral=True)
             return
 
+        # Dev bypass group check
+        is_dev = int(roblox_id) in DEVELOPER_IDS
         is_in_group, _, _ = check_group_membership(roblox_id)
-        if not is_in_group:
+        
+        if not is_in_group and not is_dev:
             embed_error = discord.Embed(title="❌ กรุณาเข้ากลุ่ม Roblox", description=f"คุณยังไม่ได้เข้ากลุ่มของเรา! บอทได้ส่งลิงก์กลุ่มไปให้คุณทาง DM แล้วครับ\n\n**ลิงก์กลุ่ม:** [คลิกที่นี่เพื่อเข้ากลุ่ม]({ROBLOX_GROUP_URL})", color=0xff0000)
             await interaction.response.send_message(embed=embed_error, ephemeral=True)
             try: await interaction.user.send(f"สวัสดีครับ! กรุณาเข้ากลุ่ม Roblox ของเราก่อนยืนยันตัวตนนะครับ: {ROBLOX_GROUP_URL}")
