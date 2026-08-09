@@ -415,58 +415,73 @@ class VerifyView(discord.ui.View):
 
 
 class CustomizeAllModal(discord.ui.Modal, title="ปรับแต่งระบบทั้งหมด"):
+    group_id = discord.ui.TextInput(
+        label="Roblox Group ID",
+        required=False,
+        placeholder="ใส่ ID กลุ่ม (ตัวเลขเท่านั้น) เช่น 226834839",
+    )
     group_url = discord.ui.TextInput(
         label="ลิงก์กลุ่ม Roblox",
         required=False,
-        max_length=300,
-        placeholder="เว้นว่างเพื่อใช้ค่าเดิม",
+        placeholder="https://www.roblox.com/groups/...",
     )
     map_url = discord.ui.TextInput(
         label="ลิงก์แมพ Roblox",
         required=False,
-        max_length=300,
-        placeholder="เว้นว่างเพื่อใช้ค่าเดิม",
+        placeholder="https://www.roblox.com/games/...",
     )
     prefixes = discord.ui.TextInput(
-        label="คำนำหน้า เช่น OF-3=MAJ; OF-4=LTC",
+        label="คำนำหน้า (แยกด้วย ;) เช่น OF-3=MAJ; OF-4=LTC",
         required=False,
-        max_length=1000,
-        placeholder="เว้นว่างเพื่อไม่เปลี่ยนแปลง",
+        style=discord.TextStyle.paragraph,
+        placeholder="or-1=PC; of-3=MAJ",
     )
     role_ids = discord.ui.TextInput(
-        label="Role IDs เช่น verified=123; or=456",
+        label="Role IDs (แยกด้วย ;) เช่น or=123; guest=456",
         required=False,
-        max_length=1000,
-        placeholder="เว้นว่างเพื่อไม่เปลี่ยนแปลง",
+        style=discord.TextStyle.paragraph,
+        placeholder="verified=ID; or=ID; of_low=ID; of_high=ID; guest=ID",
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         settings = load_settings()
+        
+        # อัพเดท Group ID
+        if self.group_id.value.strip():
+            gid = parse_id(self.group_id.value.strip())
+            if gid: settings["roblox_group_id"] = gid
+            
         if self.group_url.value.strip():
             settings["roblox_group_url"] = self.group_url.value.strip()
         if self.map_url.value.strip():
             settings["roblox_map_url"] = self.map_url.value.strip()
 
+        # อัพเดท Prefixes แบบกลุ่ม
         if self.prefixes.value.strip():
             for item in self.prefixes.value.split(";"):
-                if "=" not in item:
-                    continue
-                rank_code, title = item.split("=", 1)
-                rank_code, title = rank_code.strip(), title.strip()
-                if rank_code and title:
-                    settings["rank_prefixes"][rank_code.lower()] = f"{rank_code}, {title}"
+                if "=" not in item: continue
+                k, v = item.split("=", 1)
+                k, v = k.strip().lower(), v.strip()
+                if k and v:
+                    # ถ้าใส่มาแค่ชื่อยศ เช่น "MAJ" จะแปลงเป็น "OF-3, MAJ" ให้ตาม format
+                    if "," not in v and "-" in k:
+                        settings["rank_prefixes"][k] = f"{k.upper()}, {v}"
+                    else:
+                        settings["rank_prefixes"][k] = v
 
+        # อัพเดท Role IDs แบบกลุ่ม
         if self.role_ids.value.strip():
             for item in self.role_ids.value.split(";"):
-                if "=" not in item:
-                    continue
-                role_type, raw_id = item.split("=", 1)
-                role_type = role_type.strip().lower()
-                role_id = parse_id(raw_id)
-                if role_type in {"verified", "developer"} and role_id:
-                    settings[f"{role_type}_role_id"] = role_id
-                elif role_type in {"or", "of_low", "of_high", "guest"}:
-                    settings["role_ids"][role_type] = role_id
+                if "=" not in item: continue
+                rtype, rid_raw = item.split("=", 1)
+                rtype = rtype.strip().lower()
+                rid = parse_id(rid_raw)
+                if not rid: continue
+                
+                if rtype in {"verified", "developer"}:
+                    settings[f"{rtype}_role_id"] = rid
+                elif rtype in {"or", "of_low", "of_high", "guest"}:
+                    settings["role_ids"][rtype] = rid
 
         save_settings(settings)
         await interaction.response.send_message(
@@ -695,50 +710,4 @@ if __name__ == "__main__":
 # หมายเหตุ: บรรทัดคอมเมนต์ด้านล่างนี้ใช้เพื่อย้ำรูปแบบคำสั่งภาษาไทยเท่านั้น
 # /ยืนยันตัวตน ยังคงเป็นคำสั่งตั้งค่าข้อความปุ่มยืนยันตัวตน
 # /ล้างข้อมูล และ /ล้างข้อมูลทั้งหมด ยังคงล้างเฉพาะข้อมูลในตาราง users
-
-# ปิดท้ายด้วยการเรียกใช้งานตามปกติ
-
-# EOF
-
-# ไฟล์นี้ตั้งใจให้แทนที่สคริปต์เดิมได้โดยตรง
-
-# END
-
-# ฟังก์ชันทั้งหมดอยู่ด้านบน
-
-# END OF SCRIPT
-
-# หมายเหตุเพิ่มเติม: รหัสผ่านและ Token ไม่ได้ถูกเขียนลงไฟล์
-
-# done
-
-# final
-
-# end
-
-# end of file
-
-# ทดสอบ syntax ด้วย py_compile ก่อนใช้งานจริง
-
-# eof
-
-# หมด
-
-# จบ
-
-# end.
-
-# END SCRIPT
-
-# stop
-
-# EOF.
-
-# จบไฟล์
-
-# done.
-
-# End.
-
-# สิ้นสุดจริง
 
