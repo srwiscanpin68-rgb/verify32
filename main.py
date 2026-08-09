@@ -405,7 +405,7 @@ class VerifyView(discord.ui.View):
     async def start_v(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = get_user(interaction.user.id)
         if user and user["verified"]:
-            embed = discord.Embed(title="#พบข้อมูล Roblox Account อยู่แล้ว", color=0x3498DB)
+            embed = discord.Embed(title="❗พบข้อมูล Roblox Account อยู่แล้ว❗", color=0x3498DB)
             embed.add_field(
                 name="ข้อมูลปัจจุบัน:",
                 value=(
