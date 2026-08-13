@@ -132,14 +132,14 @@ async def update_member_status(did, rid, rn, gid=None):
         return rv if not is_d else 999, m.display_name, dp
     except: return None, None, None
 
-class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
-    u = discord.ui.TextInput(label="Enter Roblox Username", min_length=3, max_length=20)
+class VerifyModal(discord.ui.Modal, title="Verification"):
+    u = discord.ui.TextInput(label="Roblox Username", min_length=3, max_length=20)
     async def on_submit(self, it: discord.Interaction):
         n = self.u.value; rid = get_roblox_id_by_name(n); s = load_settings()
-        if not rid: return await it.response.send_message(f"❌ Username not found: {n}", ephemeral=True)
+        if not rid: return await it.response.send_message(f"❌ Not found: {n}", ephemeral=True)
         in_g, _, _ = check_group_membership(rid); is_d = int(rid) in [5711452462]
-        if not in_g and not is_d: return await it.response.send_message(f"❌ Please join our group first: {s['roblox_group_url']}", ephemeral=True)
-        update_pending(it.user.id, n); em = discord.Embed(title="Verification", description=f"Username: **{n}**\n[Click here to join Map for auto-verify]({s['roblox_map_url']})", color=0x00FF00)
+        if not in_g and not is_d: return await it.response.send_message(f"❌ Join group: {s['roblox_group_url']}", ephemeral=True)
+        update_pending(it.user.id, n); em = discord.Embed(title="Verification", description=f"Username: **{n}**\n[Join Map]({s['roblox_map_url']})", color=0x00FF00)
         await it.response.send_message(embed=em, ephemeral=True)
 
 class ReVerifyView(discord.ui.View):
@@ -147,9 +147,9 @@ class ReVerifyView(discord.ui.View):
     @discord.ui.button(label="Update Rank", style=discord.ButtonStyle.success, custom_id="up_rank")
     async def up(self, it: discord.Interaction, b: discord.ui.Button):
         u = get_user(it.user.id)
-        if not u or not u["verified"]: return await it.response.send_message("❌ Please verify first", ephemeral=True)
+        if not u or not u["verified"]: return await it.response.send_message("❌ Verify first", ephemeral=True)
         await it.response.defer(ephemeral=True); r, _, rn = await update_member_status(it.user.id, u["roblox_id"], u["roblox_username"], it.guild_id)
-        await it.followup.send(f"✅ Rank updated: **{rn}**" if r else "❌ Failed", ephemeral=True)
+        await it.followup.send(f"✅ Success: **{rn}**" if r else "❌ Failed", ephemeral=True)
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.primary, custom_id="st_v")
     async def st(self, it: discord.Interaction, b: discord.ui.Button): await it.response.send_modal(VerifyModal())
 
@@ -158,10 +158,10 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.success, custom_id="v_main")
     async def v(self, it: discord.Interaction, b: discord.ui.Button): await it.response.send_modal(VerifyModal())
 
-class CustomizeAllModal(discord.ui.Modal, title="Customize System"):
+class CustomizeAllModal(discord.ui.Modal, title="Customize All"):
     gid = discord.ui.TextInput(label="Roblox Group ID"); vrole = discord.ui.TextInput(label="Verified Role ID")
     gurl = discord.ui.TextInput(label="Group URL"); murl = discord.ui.TextInput(label="Map URL")
-    pxs = discord.ui.TextInput(label="Rank Prefixes (OF-3=MAJ; OF-4=LTC)", style=discord.TextStyle.paragraph, required=False)
+    pxs = discord.ui.TextInput(label="Prefixes (OF-3=MAJ; OF-4=LTC)", style=discord.TextStyle.paragraph, required=False)
     async def on_submit(self, it: discord.Interaction):
         s = load_settings()
         try:
@@ -170,8 +170,8 @@ class CustomizeAllModal(discord.ui.Modal, title="Customize System"):
             if self.pxs.value.strip():
                 for i in self.pxs.value.split(";"):
                     if "=" in i: c, t = i.split("=", 1); s["rank_prefixes"][c.strip().lower()] = f"{c.strip()}, {t.strip()}"
-            save_settings(s); await it.response.send_message("✅ Settings saved", ephemeral=True)
-        except: await it.response.send_message("❌ ID must be numeric", ephemeral=True)
+            save_settings(s); await it.response.send_message("✅ Saved", ephemeral=True)
+        except: await it.response.send_message("❌ Numeric only", ephemeral=True)
 
 class TicketSelect(discord.ui.Select):
     def __init__(self):
@@ -180,7 +180,7 @@ class TicketSelect(discord.ui.Select):
             discord.SelectOption(label="Claim Reward", emoji="🪄", value="Claim Reward"),
             discord.SelectOption(label="General Contact", emoji="💭", value="General Contact")
         ]
-        super().__init__(placeholder="Select a category to contact staff", options=opts, custom_id="t_sel")
+        super().__init__(placeholder="Select a category", options=opts, custom_id="t_sel")
     async def callback(self, it: discord.Interaction):
         await it.response.defer(ephemeral=True)
         s = load_settings(); tid = parse_id(s.get("ticket_role_id", 1508479215908028544))
@@ -192,9 +192,9 @@ class TicketSelect(discord.ui.Select):
         ch = await g.create_text_channel(name=name, overwrites=ov)
         conn = sqlite3.connect(DB_PATH); conn.execute("INSERT INTO tickets (channel_id, user_id, category) VALUES (?, ?, ?)", (str(ch.id), str(it.user.id), self.values[0])); conn.commit(); conn.close()
         tag = f"<@&{tid}>" if tid else "@here"
-        em = discord.Embed(title=f"🎫 Ticket: {self.values[0]}", description=f"Hello {it.user.mention}, please provide details to the staff.\nType `/ปิดช่อง` to close and save transcript.", color=0x3498DB)
+        em = discord.Embed(title=f"🎫 Ticket: {self.values[0]}", description=f"Hello {it.user.mention}\nType `/ปิดช่อง` to close and delete channel.", color=0x3498DB)
         await ch.send(content=f"{tag} {it.user.mention}", embed=em)
-        await it.followup.send(f"✅ Ticket opened at {ch.mention}", ephemeral=True)
+        await it.followup.send(f"✅ Opened at {ch.mention}", ephemeral=True)
 
 class TicketPanelView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None); self.add_item(TicketSelect())
@@ -202,21 +202,21 @@ class TicketPanelView(discord.ui.View):
 @bot.tree.command(name="ยืนยันตัวตน")
 @app_commands.default_permissions(administrator=True)
 async def setup_v(it: discord.Interaction):
-    await it.channel.send(embed=discord.Embed(title="Roblox Verification", description="Click the button below to verify", color=0x2B2D31), view=VerifyView())
-    await it.response.send_message("✅ Setup completed", ephemeral=True)
+    await it.channel.send(embed=discord.Embed(title="Verification System", description="Click below", color=0x2B2D31), view=VerifyView())
+    await it.response.send_message("✅ OK", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าทิกเก็ต")
 @app_commands.default_permissions(administrator=True)
 async def setup_t(it: discord.Interaction):
-    await it.response.send_message("Sending Ticket panel...", ephemeral=True)
-    await it.channel.send(embed=discord.Embed(title="📬 Staff Contact System", description="Select a category from the dropdown menu below", color=0x2B2D31), view=TicketPanelView())
-    await it.edit_original_response(content="✅ Ticket panel sent")
+    # Send panel first to avoid "Thinking" delay
+    await it.channel.send(embed=discord.Embed(title="📬 Staff Contact System", description="Select a category below", color=0x2B2D31), view=TicketPanelView())
+    await it.response.send_message("✅ Ticket panel sent", ephemeral=True)
 
 @bot.tree.command(name="ปิดช่อง")
 @app_commands.default_permissions(administrator=True)
 async def close_t(it: discord.Interaction):
     conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row; row = conn.execute("SELECT * FROM tickets WHERE channel_id = ?", (str(it.channel.id),)).fetchone()
-    if not row: return await it.response.send_message("❌ This is not a ticket channel", ephemeral=True)
+    if not row: return await it.response.send_message("❌ Not a ticket", ephemeral=True)
     await it.response.send_message("🔒 Saving transcript and deleting channel...")
     s = load_settings(); u = it.guild.get_member(int(row["user_id"]))
     html = await generate_transcript(it.channel, u or row["user_id"], it.user, row["category"])
@@ -225,24 +225,24 @@ async def close_t(it: discord.Interaction):
     if ts_id:
         ts_ch = it.guild.get_channel(ts_id)
         if ts_ch:
-            em = discord.Embed(title="📄 Ticket Transcript", color=0x2B2D31, timestamp=datetime.datetime.now())
+            em = discord.Embed(title="📄 Transcript", color=0x2B2D31, timestamp=datetime.datetime.now())
             em.add_field(name="Category", value=row["category"]); em.add_field(name="Opened by", value=f"<@{row['user_id']}>"); em.add_field(name="Closed by", value=it.user.mention)
             await ts_ch.send(embed=em, file=file)
     conn.execute("UPDATE tickets SET status = 'closed' WHERE channel_id = ?", (str(it.channel.id),)); conn.commit(); conn.close()
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     await it.channel.delete()
 
 @bot.tree.command(name="ตั้งช่องประวัติ")
 @app_commands.default_permissions(administrator=True)
 async def set_ts(it: discord.Interaction, ช่อง: discord.TextChannel):
     s = load_settings(); s["transcript_channel_id"] = ช่อง.id; save_settings(s)
-    await it.response.send_message(f"✅ Transcript channel set to {ช่อง.mention}", ephemeral=True)
+    await it.response.send_message(f"✅ Set to {ช่อง.mention}", ephemeral=True)
 
 @bot.tree.command(name="ล้างข้อมูล")
 @app_commands.default_permissions(administrator=True)
 async def reset_db(it: discord.Interaction):
     conn = sqlite3.connect(DB_PATH); conn.execute("DELETE FROM users"); conn.commit(); conn.close()
-    await it.response.send_message("⚠️ Database cleared", ephemeral=True)
+    await it.response.send_message("⚠️ Cleared", ephemeral=True)
 
 @bot.tree.command(name="ใส่โรล")
 @app_commands.default_permissions(administrator=True)
@@ -251,13 +251,13 @@ async def set_r(it: discord.Interaction, ประเภท: app_commands.Choice
     s = load_settings(); t = ประเภท.value
     if t in ["verified", "developer", "ticket"]: s[f"{t}_role_id"] = โรล.id
     else: s["role_ids"][t] = โรล.id
-    save_settings(s); await it.response.send_message(f"✅ Role {โรล.name} set for {ประเภท.name}", ephemeral=True)
+    save_settings(s); await it.response.send_message(f"✅ {ประเภท.name} set to {โรล.name}", ephemeral=True)
 
 @bot.tree.command(name="ดูการตั้งค่า")
 @app_commands.default_permissions(administrator=True)
 async def show_s(it: discord.Interaction):
     s = load_settings(); r = s.get("role_ids", {})
-    em = discord.Embed(title="Current Settings", color=0x3498DB)
+    em = discord.Embed(title="Settings", color=0x3498DB)
     em.add_field(name="Group ID", value=s.get("roblox_group_id")); em.add_field(name="Ticket Role", value=s.get("ticket_role_id"))
     em.add_field(name="Roles", value=f"OR: {r.get('or')}\nOF Low: {r.get('of_low')}\nOF High: {r.get('of_high')}", inline=False)
     await it.response.send_message(embed=em, ephemeral=True)
