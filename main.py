@@ -223,7 +223,6 @@ class TicketSelect(discord.ui.Select):
             ch = await guild.create_text_channel(name=f"ticket-{interaction.user.name}-{self.values[0]}"[:30], category=category, overwrites=overwrites)
             with sqlite3.connect(DB_PATH) as conn: conn.execute("INSERT INTO active_tickets VALUES (?, ?, ?, ?)", (str(ch.id), str(guild.id), str(interaction.user.id), self.values[0]))
             embed = discord.Embed(title=f"Ticket: {self.values[0].replace('_',' ').title()}", description=f"Hello {interaction.user.mention}, staff will assist you shortly.", color=0x3498DB)
-            if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
             await ch.send(content=f"{staff_role.mention if staff_role else ''} {interaction.user.mention}", embed=embed)
             await interaction.followup.send(f"✅ Ticket created: {ch.mention}", ephemeral=True)
         except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
@@ -249,9 +248,7 @@ async def setup_v(interaction: discord.Interaction):
 async def setup_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     try:
-        s = get_guild_settings(interaction.guild_id)
-        embed = discord.Embed(title="❗️ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
-        if s.get("ticket_image_url"): embed.set_image(url=s["ticket_image_url"])
+        embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
         await interaction.channel.send(embed=embed, view=TicketSetupView())
         await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
     except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
