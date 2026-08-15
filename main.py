@@ -180,7 +180,7 @@ class MyBot(commands.Bot):
         self.add_view(ReVerifyView())
         self.add_view(TicketSetupView())
         await self.tree.sync()
-        print(f"Dev System All-in-One v8 slash commands synced for {self.user}")
+        print(f"Dev System All-in-One v9 slash commands synced for {self.user}")
 
 
 bot = MyBot()
@@ -441,7 +441,7 @@ class VerifyView(discord.ui.View):
 
 
 # =========================
-# UI: TICKET SYSTEM (ENGLISH)
+# UI: TICKET SYSTEM
 # =========================
 class TicketSelect(discord.ui.Select):
     def __init__(self):
@@ -454,18 +454,15 @@ class TicketSelect(discord.ui.Select):
         super().__init__(placeholder="Select a topic to contact", min_values=1, max_values=1, options=options, custom_id="ticket_select_menu")
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
         guild = interaction.guild
-        if not guild:
-            await interaction.response.send_message("This command only works in a server.", ephemeral=True)
-            return
-
         settings = get_guild_settings(guild.id)
         staff_role_id = parse_id(settings.get("ticket_staff_role_id", 1508479215908028544))
         category_id = parse_id(settings.get("ticket_category_id"))
         
         category = guild.get_channel(category_id) if category_id else None
         
-        # Overwrites for ticket channel
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -487,10 +484,9 @@ class TicketSelect(discord.ui.Select):
                 topic=f"Ticket created by {interaction.user.id} | Type: {ticket_type_label}"
             )
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"❌ Failed to create ticket channel: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Failed to create ticket channel: {e}", ephemeral=True)
             return
 
-        # Save active ticket
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO active_tickets (channel_id, guild_id, user_id, ticket_type) VALUES (?, ?, ?, ?)",
@@ -503,10 +499,10 @@ class TicketSelect(discord.ui.Select):
             description=f"Hello {interaction.user.mention},\nStaff will assist you shortly. Please describe your issue in detail.",
             color=0x3498DB
         )
-        embed.set_footer(text="Use /close_ticket to close this ticket.")
+        embed.set_footer(text="Use /ปิดticket to close this ticket.")
         
         await ticket_channel.send(content=f"{tag_mention} {interaction.user.mention}", embed=embed)
-        await interaction.response.send_message(f"✅ Your ticket has been created: {ticket_channel.mention}", ephemeral=True)
+        await interaction.followup.send(f"✅ Your ticket has been created: {ticket_channel.mention}", ephemeral=True)
 
 
 class TicketSetupView(discord.ui.View):
@@ -595,7 +591,7 @@ class CustomizeAllModal(discord.ui.Modal, title="System Customization"):
 
 
 # =========================
-# SLASH COMMANDS (ROBLOX & TICKET)
+# SLASH COMMANDS (THAI NAMES, ENGLISH RESPONSES)
 # =========================
 @bot.tree.command(name="ยืนยันตัวตน", description="Setup Roblox verification panel (Admin Only)")
 @app_commands.default_permissions(administrator=True)
@@ -609,25 +605,12 @@ async def setup_verify(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Verification panel set up successfully.", ephemeral=True)
 
 
-async def clear_verification_data(interaction: discord.Interaction):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM users")
-    await interaction.response.send_message(
-        "⚠️ [Admin] All verification data cleared! Everyone must verify again.",
-        ephemeral=True,
-    )
-
-
 @bot.tree.command(name="ล้างข้อมูล", description="Clear all verification data")
 @app_commands.default_permissions(administrator=True)
 async def reset_db_short(interaction: discord.Interaction):
-    await clear_verification_data(interaction)
-
-
-@bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="Clear all verification data (Legacy)")
-@app_commands.default_permissions(administrator=True)
-async def reset_db_legacy(interaction: discord.Interaction):
-    await clear_verification_data(interaction)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM users")
+    await interaction.response.send_message("⚠️ [Admin] All verification data cleared successfully.", ephemeral=True)
 
 
 @bot.tree.command(name="ใส่โรล", description="Set role IDs for server categories")
@@ -649,9 +632,8 @@ async def reset_db_legacy(interaction: discord.Interaction):
 )
 async def set_role(interaction: discord.Interaction, ประเภท: app_commands.Choice[str], โรล: discord.Role):
     if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
+        await interaction.response.send_message("❌ Server only.", ephemeral=True)
         return
-
     settings = get_guild_settings(interaction.guild_id)
     role_type = ประเภท.value
     if role_type in {"verified", "developer", "ticket_staff"}:
@@ -659,36 +641,19 @@ async def set_role(interaction: discord.Interaction, ประเภท: app_com
     else:
         settings["role_ids"][role_type] = โรล.id
     save_guild_settings(interaction.guild_id, settings)
-    await interaction.response.send_message(
-        f"✅ Set role **{โรล.name}** for **{ประเภท.name}** successfully.",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(f"✅ Set role **{โรล.name}** for **{ประเภท.name}** successfully.", ephemeral=True)
 
 
 @bot.tree.command(name="ใส่คำนำหน้า", description="Add or edit rank prefixes")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(
-    ยศ="Rank code e.g. OF-3",
-    คำนำหน้า="Title e.g. MAJ",
-)
 async def set_prefix(interaction: discord.Interaction, ยศ: str, คำนำหน้า: str):
     if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
+        await interaction.response.send_message("❌ Server only.", ephemeral=True)
         return
-
-    rank_code = ยศ.strip()
-    title = คำนำหน้า.strip()
-    if not rank_code or not title:
-        await interaction.response.send_message("❌ Please provide both rank and title.", ephemeral=True)
-        return
-
     settings = get_guild_settings(interaction.guild_id)
-    settings["rank_prefixes"][rank_code.lower()] = f"{rank_code}, {title}"
+    settings["rank_prefixes"][ยศ.strip().lower()] = f"{ยศ.strip().upper()}, {คำนำหน้า.strip()}"
     save_guild_settings(interaction.guild_id, settings)
-    await interaction.response.send_message(
-        f"✅ Added prefix **{rank_code}, {title}** successfully.",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(f"✅ Added prefix **{ยศ}, {คำนำหน้า}** successfully.", ephemeral=True)
 
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Open modal to customize settings")
@@ -701,9 +666,8 @@ async def customize_all(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 async def show_settings(interaction: discord.Interaction):
     if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
+        await interaction.response.send_message("❌ Server only.", ephemeral=True)
         return
-
     settings = get_guild_settings(interaction.guild_id)
     role_ids = settings.get("role_ids", {})
     embed = discord.Embed(title="Current Server Settings", color=0x3498DB)
@@ -712,134 +676,93 @@ async def show_settings(interaction: discord.Interaction):
     embed.add_field(name="Ticket Staff Role ID", value=str(settings.get("ticket_staff_role_id")), inline=False)
     embed.add_field(
         name="Role IDs",
-        value=(
-            f"OR: `{role_ids.get('or')}`\n"
-            f"OF Low: `{role_ids.get('of_low')}`\n"
-            f"OF High: `{role_ids.get('of_high')}`\n"
-            f"Guest: `{role_ids.get('guest')}`"
-        ),
-        inline=False,
+        value=f"OR: `{role_ids.get('or')}`\nOF Low: `{role_ids.get('of_low')}`\nOF High: `{role_ids.get('of_high')}`\nGuest: `{role_ids.get('guest')}`",
+        inline=False
     )
-    embed.add_field(
-        name="Rank Prefixes",
-        value="\n".join(
-            f"`{key}` → {value}" for key, value in settings.get("rank_prefixes", {}).items()
-        )[:1024]
-        or "None",
-        inline=False,
-    )
+    embed.add_field(name="Rank Prefixes", value="\n".join(f"`{k}` → {v}" for k, v in settings.get("rank_prefixes", {}).items())[:1024] or "None", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-# =========================
-# TICKET SPECIFIC COMMANDS (ALL ENGLISH)
-# =========================
-@bot.tree.command(name="setup_ticket", description="Setup ticket panel (Admin Only)")
+# --- TICKET COMMANDS (THAI NAMES) ---
+@bot.tree.command(name="ตั้งค่าticket", description="Setup ticket panel (Admin Only)")
 @app_commands.default_permissions(administrator=True)
 async def setup_ticket(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
         title="❗️ Contact Staff / Support",
         description="Please select a topic below to open a support ticket.",
         color=0xE74C3C
     )
-    embed.set_footer(text="Eighty Six Games Support System")
+    embed.set_footer(text="Support System")
     await interaction.channel.send(embed=embed, view=TicketSetupView())
-    await interaction.response.send_message("✅ Ticket panel created successfully.", ephemeral=True)
+    await interaction.followup.send("✅ Ticket panel created successfully.", ephemeral=True)
 
 
-@bot.tree.command(name="set_transcript_channel", description="Set the channel where closed ticket transcripts will be sent")
+@bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(channel="Select text channel for transcripts")
 async def set_transcript_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
-        return
     settings = get_guild_settings(interaction.guild_id)
     settings["transcript_channel_id"] = channel.id
     save_guild_settings(interaction.guild_id, settings)
     await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
 
 
-@bot.tree.command(name="set_ticket_category", description="Set the category where new tickets are created")
+@bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(category="Select category for tickets")
 async def set_ticket_category(interaction: discord.Interaction, category: discord.CategoryChannel):
-    if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
-        return
     settings = get_guild_settings(interaction.guild_id)
     settings["ticket_category_id"] = category.id
     save_guild_settings(interaction.guild_id, settings)
     await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
 
 
-@bot.tree.command(name="anything_else", description="Ask if user needs further assistance before closing")
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม", description="Ask if user needs further assistance")
 async def anything_else(interaction: discord.Interaction):
-    if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
-        return
-    
-    # Check if current channel is an active ticket
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT * FROM active_tickets WHERE channel_id = ?", (str(interaction.channel_id),)).fetchone()
     
     if not row:
-        await interaction.response.send_message("❌ This command can only be used inside a support ticket channel.", ephemeral=True)
+        await interaction.response.send_message("❌ Only for active ticket channels.", ephemeral=True)
         return
 
     text_msg = "Do you have any further questions? If not, the staff will proceed to close this ticket."
     await interaction.response.send_message(content=text_msg)
 
 
-@bot.tree.command(name="close_ticket", description="Close the current ticket and send transcript (Admin Only)")
+@bot.tree.command(name="ปิดticket", description="Close current ticket (Admin Only)")
 @app_commands.default_permissions(administrator=True)
 async def close_ticket(interaction: discord.Interaction):
-    if not interaction.guild_id:
-        await interaction.response.send_message("❌ This command must be used inside a server.", ephemeral=True)
-        return
-
+    await interaction.response.defer(ephemeral=True)
     channel = interaction.channel
     settings = get_guild_settings(interaction.guild_id)
 
-    # Gather messages for transcript
     messages_transcript = []
     async for message in channel.history(limit=500, oldest_first=True):
         timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        author = f"{message.author.name}#{message.author.discriminator}" if message.author.discriminator != "0" else message.author.name
-        content = message.content or "[Embed or Attachment]"
+        author = message.author.name
+        content = message.content or "[Embed/Attachment]"
         messages_transcript.append(f"[{timestamp}] {author}: {content}")
 
     transcript_text = f"=== TICKET TRANSCRIPT: {channel.name} ===\n" + "\n".join(messages_transcript)
-    transcript_file = discord.File(
-        io.BytesIO(transcript_text.encode("utf-8")),
-        filename=f"transcript-{channel.name}.txt"
-    )
+    transcript_file = discord.File(io.BytesIO(transcript_text.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
 
-    # Send transcript to designated channel
     transcript_channel_id = settings.get("transcript_channel_id")
     if transcript_channel_id:
         trans_channel = interaction.guild.get_channel(parse_id(transcript_channel_id))
         if trans_channel:
-            await trans_channel.send(
-                content=f"📁 **Transcript for closed ticket:** `{channel.name}`",
-                file=transcript_file
-            )
+            await trans_channel.send(content=f"📁 **Transcript:** `{channel.name}`", file=transcript_file)
 
-    await interaction.response.send_message("🔒 Closing ticket and deleting channel in 3 seconds...", ephemeral=True)
+    await interaction.followup.send("🔒 Closing ticket in 3 seconds...", ephemeral=True)
     
-    # Remove from active tickets db
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(channel.id),))
 
     await asyncio.sleep(3)
-    try:
-        await channel.delete(reason=f"Closed by {interaction.user}")
-    except discord.HTTPException:
-        pass
+    await channel.delete()
 
 
 # =========================
-# FASTAPI WEBHOOK (ROBLOX VERIFY)
+# FASTAPI WEBHOOK
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -855,49 +778,22 @@ app = FastAPI(lifespan=lifespan)
 @app.post("/verify")
 async def verify_endpoint(request: Request):
     data = await request.json()
-    roblox_id = data.get("robloxId")
-    roblox_username = str(data.get("robloxUsername", "")).strip()
-    guild_id = data.get("guildId")
-    search_name = roblox_username.lower()
-
+    roblox_id, roblox_username, guild_id = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
+    
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            SELECT discord_id FROM users
-            WHERE LOWER(TRIM(pending_roblox_username)) = ?
-            ORDER BY rowid DESC LIMIT 1
-            """,
-            (search_name,),
-        ).fetchone()
+        row = conn.execute("SELECT discord_id FROM users WHERE LOWER(TRIM(pending_roblox_username)) = ? ORDER BY rowid DESC LIMIT 1", (roblox_username.lower(),)).fetchone()
 
     if not row:
-        return {
-            "ok": False,
-            "message": f"Username '{roblox_username}' not found in pending list (Please click verify button in Discord first).",
-        }
+        return {"ok": False, "message": f"Username '{roblox_username}' not found in pending list."}
 
-    rank, display_name, rank_name, err_msg = await update_member_status(
-        row["discord_id"], roblox_id, roblox_username, guild_id
-    )
+    rank, display_name, rank_name, err_msg = await update_member_status(row["discord_id"], roblox_id, roblox_username, guild_id)
     if rank is not None:
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                """
-                UPDATE users
-                SET roblox_id = ?, roblox_username = ?, verified = 1,
-                    pending_roblox_username = NULL
-                WHERE discord_id = ?
-                """,
-                (str(roblox_id), roblox_username, row["discord_id"]),
-            )
-        return {
-            "ok": True,
-            "discord_username": display_name,
-            "current_rank": rank_name,
-        }
+            conn.execute("UPDATE users SET roblox_id = ?, roblox_username = ?, verified = 1, pending_roblox_username = NULL WHERE discord_id = ?", (str(roblox_id), roblox_username, row["discord_id"]))
+        return {"ok": True, "discord_username": display_name, "current_rank": rank_name}
 
-    return {"ok": False, "message": err_msg or "Bot lacks permissions or server not found."}
+    return {"ok": False, "message": err_msg or "Permission error."}
 
 
 if __name__ == "__main__":
