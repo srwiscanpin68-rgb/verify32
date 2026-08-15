@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "ticket_staff_role_id": 1508479215908028544,
     "transcript_channel_id": None,
     "ticket_category_id": None,
+    "ticket_image_url": None,
     "role_ids": {
         "or": 1479699133001629797,
         "of_low": 1479699314078122094,
@@ -222,6 +223,7 @@ class TicketSelect(discord.ui.Select):
             ch = await guild.create_text_channel(name=f"ticket-{interaction.user.name}-{self.values[0]}"[:30], category=category, overwrites=overwrites)
             with sqlite3.connect(DB_PATH) as conn: conn.execute("INSERT INTO active_tickets VALUES (?, ?, ?, ?)", (str(ch.id), str(guild.id), str(interaction.user.id), self.values[0]))
             embed = discord.Embed(title=f"Ticket: {self.values[0].replace('_',' ').title()}", description=f"Hello {interaction.user.mention}, staff will assist you shortly.", color=0x3498DB)
+            if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
             await ch.send(content=f"{staff_role.mention if staff_role else ''} {interaction.user.mention}", embed=embed)
             await interaction.followup.send(f"✅ Ticket created: {ch.mention}", ephemeral=True)
         except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
@@ -235,14 +237,24 @@ class TicketSetupView(discord.ui.View):
 @bot.tree.command(name="ยืนยันตัวตน", description="Setup Roblox verification panel")
 @app_commands.default_permissions(administrator=True)
 async def setup_v(interaction: discord.Interaction):
-    await interaction.response.send_message("✅ Verification panel created.", ephemeral=True)
-    await interaction.channel.send(embed=discord.Embed(title="Thai Military Verification", description="Click below to start.", color=0x2B2D31), view=VerifyView())
+    await interaction.response.defer(ephemeral=True)
+    try:
+        embed = discord.Embed(title="Thai Military Verification", description="Click below to start.", color=0x2B2D31)
+        await interaction.channel.send(embed=embed, view=VerifyView())
+        await interaction.followup.send("✅ Verification panel created.", ephemeral=True)
+    except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าticket", description="Setup ticket panel")
 @app_commands.default_permissions(administrator=True)
 async def setup_t(interaction: discord.Interaction):
-    await interaction.response.send_message("✅ Ticket panel created.", ephemeral=True)
-    await interaction.channel.send(embed=discord.Embed(title="❗️ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C), view=TicketSetupView())
+    await interaction.response.defer(ephemeral=True)
+    try:
+        s = get_guild_settings(interaction.guild_id)
+        embed = discord.Embed(title="❗️ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
+        if s.get("ticket_image_url"): embed.set_image(url=s["ticket_image_url"])
+        await interaction.channel.send(embed=embed, view=TicketSetupView())
+        await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
+    except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="ปิดticket", description="Close current ticket")
 @app_commands.default_permissions(administrator=True)
@@ -281,6 +293,7 @@ async def show_s(interaction: discord.Interaction):
     e = discord.Embed(title="Current Server Settings", color=0x3498DB)
     e.add_field(name="Group ID", value=str(s["roblox_group_id"]), inline=False)
     e.add_field(name="Staff Role", value=f"<@&{s['ticket_staff_role_id']}>", inline=False)
+    e.add_field(name="Ticket Image", value=str(s.get("ticket_image_url") or "Not Set"), inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Customize all settings")
@@ -289,11 +302,13 @@ async def cust_all(interaction: discord.Interaction):
     class CustModal(discord.ui.Modal, title="System Customization"):
         gid = discord.ui.TextInput(label="Roblox Group ID", required=False)
         sid = discord.ui.TextInput(label="Staff Role ID", required=False)
+        img = discord.ui.TextInput(label="Ticket Image URL", required=False)
         pfx = discord.ui.TextInput(label="Prefixes (e.g. of-3=MAJ;)", style=discord.TextStyle.paragraph, required=False)
         async def on_submit(self, interaction: discord.Interaction):
             s = get_guild_settings(interaction.guild_id)
             if self.gid.value: s["roblox_group_id"] = parse_id(self.gid.value)
             if self.sid.value: s["ticket_staff_role_id"] = parse_id(self.sid.value)
+            if self.img.value: s["ticket_image_url"] = self.img.value.strip()
             if self.pfx.value:
                 for item in self.pfx.value.split(";"):
                     if "=" in item:
