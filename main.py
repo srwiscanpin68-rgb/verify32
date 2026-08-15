@@ -270,9 +270,26 @@ async def close_t(interaction: discord.Interaction):
     with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(interaction.channel_id),))
     await asyncio.sleep(3); await interaction.channel.delete()
 
-@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม", description="Ask for more questions")
-async def ask_more(interaction: discord.Interaction):
-    await interaction.response.send_message("Do you have any further questions? If not, the staff will proceed to close this ticket.")
+async def send_ask_more_embed(interaction, text):
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT * FROM active_tickets WHERE channel_id = ?", (str(interaction.channel_id),)).fetchone()
+    if not row:
+        await interaction.response.send_message("❌ This command can only be used inside an active ticket channel.", ephemeral=True)
+        return
+    
+    settings = get_guild_settings(interaction.guild_id)
+    embed = discord.Embed(description=text, color=0x3498DB)
+    if settings.get("ticket_image_url"):
+        embed.set_image(url=settings["ticket_image_url"])
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask if user needs further assistance (English)")
+async def ask_more_en(interaction: discord.Interaction):
+    await send_ask_more_embed(interaction, "Do you have any further questions? If not, the staff will proceed to close this ticket.")
+
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask if user needs further assistance (Thai)")
+async def ask_more_th(interaction: discord.Interaction):
+    await send_ask_more_embed(interaction, "มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ")
 
 @bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
 @app_commands.default_permissions(administrator=True)
