@@ -356,18 +356,30 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/verify")
 async def verify_ep(request: Request):
-    data = await request.json()
-    rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT discord_id FROM users WHERE LOWER(TRIM(pending_roblox_username)) = ? ORDER BY rowid DESC LIMIT 1", (rname.lower(),)).fetchone()
-    if not row: return {"ok": False, "message": "Username not found in pending list."}
-    
-    dname, err = await update_member_status(row[0], rid, rname, gid)
-    if not err:
+    try:
+        data = await request.json()
+        print(f"[Webhook] Received request: {data}")
+        rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
+        
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("UPDATE users SET roblox_id=?, roblox_username=?, verified=1, pending_roblox_username=NULL WHERE discord_id=?", (str(rid), rname, row[0]))
-        return {"ok": True, "discord_username": dname, "roblox_id": str(rid)}
-    return {"ok": False, "message": err}
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT discord_id FROM users WHERE LOWER(TRIM(pending_roblox_username)) = ? ORDER BY rowid DESC LIMIT 1", (rname.lower(),)).fetchone()
+        
+        if not row:
+            print(f"[Webhook] Error: Username '{rname}' not found in pending list.")
+            return {"ok": False, "message": "Please verify on Discord first."}
+        
+        dname, err = await update_member_status(row[0], rid, rname, gid)
+        if not err:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("UPDATE users SET roblox_id=?, roblox_username=?, verified=1, pending_roblox_username=NULL WHERE discord_id=?", (str(rid), rname, row[0]))
+            print(f"[Webhook] Success: Verified {rname} for Discord {dname}")
+            return {"ok": True, "discord_username": dname, "roblox_id": str(rid)}
+        
+        print(f"[Webhook] Error: {err}")
+        return {"ok": False, "message": err}
+    except Exception as e:
+        print(f"[Webhook] Critical Error: {e}")
+        return {"ok": False, "message": "Internal Server Error"}
 
 if __name__ == "__main__": uvicorn.run(app, host="0.0.0.0", port=PORT)
