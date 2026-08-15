@@ -256,19 +256,69 @@ async def setup_t(interaction: discord.Interaction):
         await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
     except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-@bot.tree.command(name="ปิดticket", description="Close current ticket")
+@bot.tree.command(name="ปิดticket", description="Close current ticket and generate HTML transcript")
 @app_commands.default_permissions(administrator=True)
 async def close_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
-    logs = []
-    async for m in interaction.channel.history(limit=500, oldest_first=True): logs.append(f"[{m.created_at.strftime('%Y-%m-%d %H:%M')}] {m.author}: {m.content or '[Attachment]'}")
-    file = discord.File(io.BytesIO("\n".join(logs).encode()), filename=f"transcript-{interaction.channel.name}.txt")
-    t_ch = interaction.guild.get_channel(parse_id(settings.get("transcript_channel_id")))
-    if t_ch: await t_ch.send(content=f"📁 Transcript: `{interaction.channel.name}`", file=file)
-    await interaction.followup.send("🔒 Closing in 3s...", ephemeral=True)
-    with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(interaction.channel_id),))
-    await asyncio.sleep(3); await interaction.channel.delete()
+    channel = interaction.channel
+    
+    html_content = f"""
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ background-color: #36393f; color: #dcddde; font-family: sans-serif; padding: 20px; }}
+            .msg {{ display: flex; margin-bottom: 15px; }}
+            .avatar {{ width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; background-color: #4f545c; }}
+            .content {{ display: flex; flex-direction: column; }}
+            .header {{ display: flex; align-items: center; margin-bottom: 5px; }}
+            .author {{ font-weight: bold; color: #ffffff; margin-right: 10px; }}
+            .time {{ font-size: 0.75rem; color: #72767d; }}
+            .text {{ line-height: 1.4; white-space: pre-wrap; word-break: break-word; }}
+            .ticket-header {{ border-bottom: 1px solid #4f545c; padding-bottom: 10px; margin-bottom: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="ticket-header">
+            <h1>Transcript: {channel.name}</h1>
+            <p>Closed by: {interaction.user.name} | Date: {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+        </div>
+    """
+    
+    async for m in channel.history(limit=1000, oldest_first=True):
+        timestamp = m.created_at.strftime('%Y-%m-%d %H:%M')
+        content = m.clean_content or "[Embed or Attachment]"
+        avatar_url = m.author.display_avatar.url if m.author.display_avatar else ""
+        
+        html_content += f"""
+        <div class="msg">
+            <img class="avatar" src="{avatar_url}">
+            <div class="content">
+                <div class="header">
+                    <span class="author">{m.author.display_name}</span>
+                    <span class="time">{timestamp}</span>
+                </div>
+                <div class="text">{content}</div>
+            </div>
+        </div>
+        """
+    
+    html_content += "</body></html>"
+    
+    file = discord.File(io.BytesIO(html_content.encode("utf-8")), filename=f"transcript-{channel.name}.html")
+    t_ch_id = parse_id(settings.get("transcript_channel_id"))
+    if t_ch_id:
+        t_ch = interaction.guild.get_channel(t_ch_id)
+        if t_ch:
+            await t_ch.send(content=f"📁 **HTML Transcript for:** `{channel.name}`", file=file)
+    
+    await interaction.followup.send("🔒 Closing ticket and saving HTML transcript in 3s...", ephemeral=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(channel.id),))
+    
+    await asyncio.sleep(3)
+    await channel.delete()
 
 async def send_ask_more_embed(interaction, text):
     with sqlite3.connect(DB_PATH) as conn:
