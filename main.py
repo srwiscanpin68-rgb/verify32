@@ -278,24 +278,26 @@ async def ask_en(interaction: discord.Interaction): await send_ask_more_embed(in
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask for more questions (TH)")
 async def ask_th(interaction: discord.Interaction): await send_ask_more_embed(interaction, "มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ")
 
-@bot.tree.command(name="update", description="Send announcement update")
+class UpdateModal(discord.ui.Modal, title="System Announcement"):
+    message = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, placeholder="Enter announcement message...", required=True)
+    image_url = discord.ui.TextInput(label="Image URL (Optional)", style=discord.TextStyle.short, placeholder="https://...", required=False)
+    note = discord.ui.TextInput(label="Note (Optional)", style=discord.TextStyle.short, placeholder="Small note at the bottom...", required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        embed = discord.Embed(description=self.message.value, color=0x3498DB)
+        if self.image_url.value:
+            embed.set_image(url=self.image_url.value.strip())
+        if self.note.value:
+            embed.add_field(name="\u200b", value=f"-# {self.note.value.strip()}", inline=False)
+        
+        await interaction.channel.send(content="||@everyone||", embed=embed)
+        await interaction.followup.send("✅ Announcement sent successfully.", ephemeral=True)
+
+@bot.tree.command(name="update", description="Send announcement update via modal")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(message="Main announcement message", image_url="Direct image URL (optional)", note="Small note at the bottom (optional)")
-async def update_cmd(interaction: discord.Interaction, message: str, image_url: str = None, note: str = None):
-    # Respond ephemerally so the command execution header is hidden from others
-    await interaction.response.defer(ephemeral=True)
-    
-    embed = discord.Embed(description=message, color=0x3498DB)
-    if image_url:
-        embed.set_image(url=image_url.strip())
-    if note:
-        embed.add_field(name="\u200b", value=f"-# {note.strip()}", inline=False)
-    
-    # Send content with ||@everyone|| or @everyone
-    content = "||@everyone||"
-    
-    await interaction.channel.send(content=content, embed=embed)
-    await interaction.followup.send("✅ Announcement sent successfully.", ephemeral=True)
+async def update_cmd(interaction: discord.Interaction):
+    await interaction.response.send_modal(UpdateModal())
 
 @bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
 @app_commands.default_permissions(administrator=True)
