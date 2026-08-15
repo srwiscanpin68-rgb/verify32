@@ -331,7 +331,11 @@ async def send_ask_more_embed(interaction, text):
     embed = discord.Embed(description=text, color=0x3498DB)
     if settings.get("ticket_image_url"):
         embed.set_image(url=settings["ticket_image_url"])
-    await interaction.response.send_message(embed=embed)
+    
+    # ส่งเป็นข้อความปกติลงในแชนเนลเพื่อไม่ให้มีแถบ "ใช้แล้ว..."
+    await interaction.channel.send(embed=embed)
+    # ตอบกลับ Interaction แบบลับๆ เพื่อจบการทำงานของ Slash Command
+    await interaction.response.send_message("✅ Message sent.", ephemeral=True)
 
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask if user needs further assistance (English)")
 async def ask_more_en(interaction: discord.Interaction):
