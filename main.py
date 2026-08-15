@@ -278,6 +278,18 @@ async def ask_en(interaction: discord.Interaction): await send_ask_more_embed(in
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask for more questions (TH)")
 async def ask_th(interaction: discord.Interaction): await send_ask_more_embed(interaction, "มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ")
 
+@bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
+@app_commands.default_permissions(administrator=True)
+async def set_trans(interaction: discord.Interaction, channel: discord.TextChannel):
+    s = get_guild_settings(interaction.guild_id); s["transcript_channel_id"] = channel.id; save_guild_settings(interaction.guild_id, s)
+    await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
+
+@bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
+@app_commands.default_permissions(administrator=True)
+async def set_cat(interaction: discord.Interaction, category: discord.CategoryChannel):
+    s = get_guild_settings(interaction.guild_id); s["ticket_category_id"] = category.id; save_guild_settings(interaction.guild_id, s)
+    await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
+
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Customize settings")
 @app_commands.default_permissions(administrator=True)
 async def cust_all(interaction: discord.Interaction):
