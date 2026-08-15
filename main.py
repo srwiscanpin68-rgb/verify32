@@ -206,9 +206,9 @@ class VerifyView(discord.ui.View):
 class TicketSelect(discord.ui.Select):
     def __init__(self):
         opts = [
-            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji="❗️"),
-            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji="🪄"),
-            discord.SelectOption(label="General Contact", value="general_contact", emoji="💭"),
+            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji="❗"),
+            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji="⭐"),
+            discord.SelectOption(label="General Contact", value="general_contact", emoji="💬"),
             discord.SelectOption(label="Receive an award", value="receive_award", emoji="🎁"),
         ]
         super().__init__(placeholder="Select a topic to contact", min_values=1, max_values=1, options=opts, custom_id="ticket_select_menu")
