@@ -20,7 +20,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 DB_PATH = os.getenv("DB_PATH", "database.db")
 ALLOWED_BAN_CHANNEL_ID = 1538165546145677382
-ALLOWED_ADMIN_IDS = [1284107691723067454]  # ใส่ Discord User ID ของแอดมินที่ต้องการที่นี่
+ALLOWED_ADMIN_IDS = [1284107691723067454, 1478835050794586115, 1529705441595097122]  # ใส่ Discord User ID ของแอดมินที่ต้องการที่นี่
 
 DEFAULT_SETTINGS = {
     "roblox_group_id": 726824718,
