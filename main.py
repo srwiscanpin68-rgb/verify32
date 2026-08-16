@@ -20,7 +20,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 DB_PATH = os.getenv("DB_PATH", "database.db")
 ALLOWED_BAN_CHANNEL_ID = 1538165546145677382
-ALLOWED_ADMIN_IDS = 1478835050794586115  # ใส่ Discord User ID ของแอดมินที่ต้องการที่นี่
+ALLOWED_ADMIN_IDS = [1478835050794586115]  # ใส่ Discord User ID ของแอดมินที่ต้องการที่นี่ (ต้องอยู่ในเครื่องหมาย [ ])
 
 DEFAULT_SETTINGS = {
     "roblox_group_id": 726824718,
@@ -365,7 +365,8 @@ async def setup_t(interaction: discord.Interaction):
 ])
 async def game_ban(interaction: discord.Interaction, unit: str):
     # Check if user is in admin list OR is an administrator
-    is_admin = interaction.user.id in ALLOWED_ADMIN_IDS or interaction.user.guild_permissions.administrator
+    admin_list = ALLOWED_ADMIN_IDS if isinstance(ALLOWED_ADMIN_IDS, list) else [ALLOWED_ADMIN_IDS]
+    is_admin = interaction.user.id in admin_list or interaction.user.guild_permissions.administrator
     if not is_admin:
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
@@ -379,7 +380,8 @@ async def game_ban(interaction: discord.Interaction, unit: str):
 @app_commands.describe(username="Roblox username to unban")
 async def unban_cmd(interaction: discord.Interaction, username: str):
     # Check if user is in admin list OR is an administrator
-    is_admin = interaction.user.id in ALLOWED_ADMIN_IDS or interaction.user.guild_permissions.administrator
+    admin_list = ALLOWED_ADMIN_IDS if isinstance(ALLOWED_ADMIN_IDS, list) else [ALLOWED_ADMIN_IDS]
+    is_admin = interaction.user.id in admin_list or interaction.user.guild_permissions.administrator
     if not is_admin:
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
