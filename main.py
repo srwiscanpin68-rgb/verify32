@@ -283,7 +283,7 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
             conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                          (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
 
-        embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
+        embed = discord.Embed(title="🚨 Ban : Banned", color=0xE74C3C)
         embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
         embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
         embed.add_field(name="Reason", value=self.reason.value.strip(), inline=False)
