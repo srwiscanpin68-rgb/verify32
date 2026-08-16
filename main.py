@@ -7,6 +7,7 @@ import io
 import requests
 import discord
 import uvicorn
+from datetime import datetime, timedelta
 from discord.ext import commands
 from discord import app_commands
 from fastapi import FastAPI, Request
@@ -21,11 +22,11 @@ DB_PATH = os.getenv("DB_PATH", "database.db")
 ALLOWED_BAN_CHANNEL_ID = 1538165546145677382
 
 DEFAULT_SETTINGS = {
-    "roblox_group_id": 226834839,
-    "roblox_group_url": "https://www.roblox.com/groups/226834839",
-    "roblox_map_url": "https://www.roblox.com/th/games/78189317414125/By",
+    "roblox_group_id": 726824718,
+    "roblox_group_url": "https://www.roblox.com/groups/726824718",
+    "roblox_map_url": "https://www.roblox.com/th/games/74415906392980/unnamed",
     "verified_role_id": 1508479215908028543,
-    "developer_role_id": 1479469155399766129,
+    "developer_role_id": 1508479215995977759,
     "ticket_staff_role_id": 1508479215908028544,
     "transcript_channel_id": None,
     "ticket_category_id": None,
@@ -54,7 +55,10 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER DEFAULT 0, pending_roblox_username TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, settings_json TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS active_tickets (channel_id TEXT PRIMARY KEY, guild_id TEXT, user_id TEXT, ticket_type TEXT)")
-        conn.execute("CREATE TABLE IF NOT EXISTS bans (roblox_id TEXT PRIMARY KEY, roblox_username TEXT, link TEXT, reason TEXT, status TEXT, image_url TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS bans (roblox_id TEXT PRIMARY KEY, roblox_username TEXT, link TEXT, reason TEXT, status TEXT, image_url TEXT, expires_at TIMESTAMP)")
+        # Migrate existing database if column missing
+        try: conn.execute("ALTER TABLE bans ADD COLUMN expires_at TIMESTAMP")
+        except: pass
 
 def get_guild_settings(guild_id):
     if not guild_id: return json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -230,10 +234,15 @@ class TicketSetupView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None); self.add_item(TicketSelect())
 
 class GameBanModal(discord.ui.Modal, title="Game Ban System"):
+    def __init__(self, unit: str):
+        super().__init__()
+        self.unit = unit
+        self.duration_val = discord.ui.TextInput(label=f"Number of {unit} to ban", placeholder="Enter a number (e.g. 7)", required=True)
+        self.add_item(self.duration_val)
+
     username = discord.ui.TextInput(label="Username Roblox", placeholder="Enter Roblox username...", required=True)
     link = discord.ui.TextInput(label="Link Roblox", placeholder="https://www.roblox.com/users/...", required=True)
     reason = discord.ui.TextInput(label="Reason", style=discord.TextStyle.paragraph, placeholder="Reason for ban...", required=True)
-    status = discord.ui.TextInput(label="Status", placeholder="Banned / Blacklisted", required=True)
     image_url = discord.ui.TextInput(label="ใส่ลิ้งรูป", placeholder="https://...", required=False)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -244,20 +253,47 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
             await interaction.followup.send(f"❌ Roblox user **{rname}** not found.", ephemeral=True)
             return
 
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url) VALUES (?, ?, ?, ?, ?, ?)",
-                         (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), self.status.value.strip(), self.image_url.value.strip() if self.image_url.value else None))
+        try:
+            val = int(self.duration_val.value.strip())
+        except ValueError:
+            await interaction.followup.send("❌ Please enter a valid number for duration.", ephemeral=True)
+            return
 
-        embed = discord.Embed(title="🚨 Ban : Banned", color=0xE74C3C)
+        now = datetime.now()
+        delta = None
+        expires_at = None
+        
+        if self.unit == "Minutes": delta = timedelta(minutes=val)
+        elif self.unit == "Hours": delta = timedelta(hours=val)
+        elif self.unit == "Days": delta = timedelta(days=val)
+        elif self.unit == "Months": delta = timedelta(days=val*30)
+        elif self.unit == "Years": delta = timedelta(days=val*365)
+        
+        if delta:
+            expires_at = now + delta
+            expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
+            expires_ts = expires_at.timestamp()
+            status_text = f"Banned for {val} {self.unit}"
+        else:
+            expires_str = "Never (Permanent)"
+            expires_ts = None
+            status_text = "Permanently Banned"
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
+
+        embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
         embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
         embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
         embed.add_field(name="Reason", value=self.reason.value.strip(), inline=False)
-        embed.add_field(name="Status", value=f"🔴 {self.status.value.strip()}", inline=False)
+        embed.add_field(name="Status", value=f"🔴 {status_text}", inline=False)
+        embed.add_field(name="Expires At", value=f"📅 {expires_str}", inline=False)
         if self.image_url.value:
             embed.set_image(url=self.image_url.value.strip())
 
         await interaction.channel.send(content="||@everyone||", embed=embed)
-        await interaction.followup.send("✅ Ban registered and executed successfully.", ephemeral=True)
+        await interaction.followup.send(f"✅ Banned {rname} until {expires_str}.", ephemeral=True)
 
 # =========================
 # SLASH COMMANDS
@@ -280,11 +316,19 @@ async def setup_t(interaction: discord.Interaction):
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
 @app_commands.default_permissions(administrator=True)
-async def game_ban(interaction: discord.Interaction):
+@app_commands.choices(unit=[
+    app_commands.Choice(name="Minutes", value="Minutes"),
+    app_commands.Choice(name="Hours", value="Hours"),
+    app_commands.Choice(name="Days", value="Days"),
+    app_commands.Choice(name="Months", value="Months"),
+    app_commands.Choice(name="Years", value="Years"),
+    app_commands.Choice(name="Permanent", value="Permanent"),
+])
+async def game_ban(interaction: discord.Interaction, unit: str):
     if interaction.channel_id != ALLOWED_BAN_CHANNEL_ID:
         await interaction.response.send_message(f"❌ This command can only be used in <#{ALLOWED_BAN_CHANNEL_ID}>", ephemeral=True)
         return
-    await interaction.response.send_modal(GameBanModal())
+    await interaction.response.send_modal(GameBanModal(unit))
 
 @bot.tree.command(name="unban", description="Unban a player from the game")
 @app_commands.default_permissions(administrator=True)
@@ -408,9 +452,18 @@ async def check_ban_ep(roblox_id: str):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
+    
     if row:
-        print(f"[BanCheck] Found ban for {roblox_id}: {row['reason']}")
+        expires_at = row["expires_at"]
+        if expires_at and datetime.now().timestamp() > expires_at:
+            print(f"[BanCheck] Ban for {roblox_id} expired. Auto-unbanning.")
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(roblox_id),))
+            return {"banned": False}
+            
+        print(f"[BanCheck] Found active ban for {roblox_id}: {row['reason']}")
         return {"banned": True, "reason": row["reason"], "status": row["status"]}
+    
     print(f"[BanCheck] No ban found for {roblox_id}")
     return {"banned": False}
 
