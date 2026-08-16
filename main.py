@@ -364,9 +364,15 @@ async def setup_t(interaction: discord.Interaction):
     app_commands.Choice(name="Permanent", value="Permanent"),
 ])
 async def game_ban(interaction: discord.Interaction, unit: str):
-    # Check if user is in admin list OR is an administrator
+    # Check if user is in admin list (User ID or Role ID) OR is an administrator
     admin_list = ALLOWED_ADMIN_IDS if isinstance(ALLOWED_ADMIN_IDS, list) else [ALLOWED_ADMIN_IDS]
-    is_admin = interaction.user.id in admin_list or interaction.user.guild_permissions.administrator
+    user_roles = [role.id for role in interaction.user.roles]
+    is_admin = (interaction.user.id in admin_list) or \
+               (any(role_id in admin_list for role_id in user_roles)) or \
+               (interaction.user.guild_permissions.administrator)
+    
+    print(f"[AdminCheck] User: {interaction.user.name} ({interaction.user.id}), IsAdmin: {is_admin}")
+    
     if not is_admin:
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
@@ -379,9 +385,15 @@ async def game_ban(interaction: discord.Interaction, unit: str):
 @bot.tree.command(name="unban", description="Unban a player from the game")
 @app_commands.describe(username="Roblox username to unban")
 async def unban_cmd(interaction: discord.Interaction, username: str):
-    # Check if user is in admin list OR is an administrator
+    # Check if user is in admin list (User ID or Role ID) OR is an administrator
     admin_list = ALLOWED_ADMIN_IDS if isinstance(ALLOWED_ADMIN_IDS, list) else [ALLOWED_ADMIN_IDS]
-    is_admin = interaction.user.id in admin_list or interaction.user.guild_permissions.administrator
+    user_roles = [role.id for role in interaction.user.roles]
+    is_admin = (interaction.user.id in admin_list) or \
+               (any(role_id in admin_list for role_id in user_roles)) or \
+               (interaction.user.guild_permissions.administrator)
+    
+    print(f"[AdminCheck] User: {interaction.user.name} ({interaction.user.id}), IsAdmin: {is_admin}")
+    
     if not is_admin:
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
