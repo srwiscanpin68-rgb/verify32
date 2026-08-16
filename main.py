@@ -20,7 +20,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 DB_PATH = os.getenv("DB_PATH", "database.db")
 
-# ล้างเลข ID ทั้งหมดออกเพื่อให้คุณใส่เองผ่านคำสั่งบอท
+# ล้างเลข ID ออกตามที่คุณต้องการ
 DEFAULT_SETTINGS = {
     "roblox_group_id": 0,
     "roblox_group_url": "",
@@ -91,7 +91,7 @@ def get_safe_emoji(emoji_str):
     return emoji_str
 
 # =========================
-# PERMISSION CHECK (Robust)
+# PERMISSION CHECK (Robust for High Roles)
 # =========================
 def is_user_admin(interaction: discord.Interaction):
     # 1. Administrator permission or Server Owner
@@ -104,13 +104,13 @@ def is_user_admin(interaction: discord.Interaction):
     if any(role in top_roles for role in interaction.user.roles):
         return True
 
-    # 3. Check Role Names
+    # 3. Check Role Names (Admin, Staff, Owner, Moderator, Manager, Dev)
     admin_keywords = {"admin", "staff", "owner", "moderator", "manager", "dev"}
     for role in interaction.user.roles:
         if any(kw in role.name.lower() for kw in admin_keywords):
             return True
             
-    # 4. Whitelist check
+    # 4. Whitelist from settings
     settings = get_guild_settings(interaction.guild_id)
     admin_str = str(settings.get("admin_ids", ""))
     admin_list = [x.strip() for x in admin_str.split(";") if x.strip()]
@@ -149,7 +149,7 @@ def get_roblox_id_by_name(username):
     return None
 
 def check_group_membership(roblox_id, group_id):
-    if not group_id: return False, 0, None
+    if not group_id or group_id == 0: return False, 0, None
     try:
         resp = requests.get(f"https://groups.roblox.com/v1/users/{roblox_id}/groups/roles", timeout=10)
         for group in resp.json().get("data", []):
@@ -307,7 +307,7 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
         await interaction.followup.send("✅ Banned successfully.", ephemeral=True)
 
 # =========================
-# SLASH COMMANDS (THAI NAMES)
+# SLASH COMMANDS (ORIGINAL NAMES)
 # =========================
 @bot.tree.command(name="ยืนยันตัวตน", description="สร้างแผงยืนยันตัวตน")
 async def setup_v(interaction: discord.Interaction):
@@ -363,21 +363,23 @@ async def setup_t(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=TicketSetupView())
     await interaction.response.send_message("✅ Ticket panel created.", ephemeral=True)
 
-@bot.tree.command(name="แบนผู้เล่น", description="แบนผู้เล่นออกจากเกม (Game-Ban)")
-async def game_ban_th(interaction: discord.Interaction, unit: str):
-    if not is_user_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+# คำสั่งแบนดั้งเดิม (ภาษาอังกฤษ) - ถอนการล็อคสิทธิ์เพื่อให้โผล่ในรายการแน่นอน
+@bot.tree.command(name="game-ban", description="Ban a player from the game")
+async def game_ban(interaction: discord.Interaction, unit: str):
+    if not is_user_admin(interaction):
+        return await interaction.response.send_message(f"❌ No permission. (Your ID: {interaction.user.id})", ephemeral=True)
     s = get_guild_settings(interaction.guild_id)
     if interaction.channel_id != parse_id(s.get("allowed_ban_channel_id", 0)):
         return await interaction.response.send_message(f"❌ Use in <#{s.get('allowed_ban_channel_id')}>", ephemeral=True)
     await interaction.response.send_modal(GameBanModal(unit))
 
-@game_ban_th.autocomplete("unit")
+@game_ban.autocomplete("unit")
 async def ban_unit_auto(interaction: discord.Interaction, current: str):
     units = ["Minutes", "Hours", "Days", "Months", "Years", "Permanent"]
     return [app_commands.Choice(name=u, value=u) for u in units if current.lower() in u.lower()]
 
-@bot.tree.command(name="ปลดแบน", description="ปลดแบนผู้เล่น (Unban)")
-async def unban_th(interaction: discord.Interaction, username: str):
+@bot.tree.command(name="unban", description="Unban a player")
+async def unban_cmd(interaction: discord.Interaction, username: str):
     if not is_user_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     rid = get_roblox_id_by_name(username)
@@ -447,6 +449,24 @@ async def set_cat(interaction: discord.Interaction, category: discord.CategoryCh
     if not is_user_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id); s["ticket_category_id"] = category.id; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
+
+@bot.tree.command(name="ปรับแต่งทั้งหมด", description="แผงควบคุมการตั้งค่า")
+async def cust_all(interaction: discord.Interaction):
+    if not is_user_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
+    s = get_guild_settings(interaction.guild_id)
+    class CustModal(discord.ui.Modal, title="Settings"):
+        gid = discord.ui.TextInput(label="Roblox Group ID", default=str(s['roblox_group_id']))
+        sid = discord.ui.TextInput(label="Staff Role ID", default=str(s['ticket_staff_role_id']))
+        admins = discord.ui.TextInput(label="Admin IDs (Separate with ;)", default=s['admin_ids'], required=False)
+        ban_ch = discord.ui.TextInput(label="Ban Channel ID", default=str(s['allowed_ban_channel_id']))
+        img = discord.ui.TextInput(label="Ticket Image URL", default=str(s.get('ticket_image_url', '')), required=False)
+        async def on_submit(self, interaction: discord.Interaction):
+            s = get_guild_settings(interaction.guild_id)
+            s["roblox_group_id"] = parse_id(self.gid.value); s["ticket_staff_role_id"] = parse_id(self.sid.value)
+            s["admin_ids"] = self.admins.value.strip(); s["allowed_ban_channel_id"] = parse_id(self.ban_ch.value)
+            s["ticket_image_url"] = self.img.value.strip(); save_guild_settings(interaction.guild_id, s)
+            await interaction.response.send_message("✅ Updated.", ephemeral=True)
+    await interaction.response.send_modal(CustModal())
 
 @bot.tree.command(name="sync", description="Sync commands (Owner Only)")
 async def sync_cmd(interaction: discord.Interaction):
