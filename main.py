@@ -90,26 +90,32 @@ def get_safe_emoji(emoji_str):
     return emoji_str
 
 # =========================
-# PERMISSION CHECK (Restored & Fixed)
+# PERMISSION CHECK (Enhanced)
 # =========================
 def is_user_admin(interaction: discord.Interaction):
     # 1. Administrator permission or Server Owner
     if interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id:
         return True
     
-    # 2. Check Role Names (Admin, Staff, Owner, Moderator)
-    admin_keywords = {"admin", "staff", "owner", "moderator", "dev"}
+    # 2. Check for high roles (Top 5 roles in the server)
+    sorted_roles = sorted(interaction.guild.roles, key=lambda r: r.position, reverse=True)
+    top_roles = sorted_roles[:5]
+    if any(role in top_roles for role in interaction.user.roles):
+        return True
+
+    # 3. Check Role Names (Admin, Staff, Owner, Moderator, Manager, Dev)
+    admin_keywords = {"admin", "staff", "owner", "moderator", "manager", "dev"}
     for role in interaction.user.roles:
         if any(kw in role.name.lower() for kw in admin_keywords):
             return True
             
-    # 3. Check specific Staff Role from settings
+    # 4. Check specific Staff Role from settings
     settings = get_guild_settings(interaction.guild_id)
     staff_role_id = parse_id(settings.get("ticket_staff_role_id"))
     if staff_role_id and any(r.id == staff_role_id for r in interaction.user.roles):
         return True
         
-    # 4. Manual ID whitelist
+    # 5. Manual ID whitelist
     admin_str = str(settings.get("admin_ids", ""))
     admin_list = [x.strip() for x in admin_str.split(";") if x.strip()]
     if str(interaction.user.id) in admin_list:
@@ -360,7 +366,7 @@ async def setup_t(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=TicketSetupView())
     await interaction.response.send_message("✅ Ticket panel created.", ephemeral=True)
 
-@bot.tree.command(name="game-ban", description="แบนผู้เล่นออกจากเกม")
+@bot.tree.command(name="แบนผู้เล่น", description="แบนผู้เล่นออกจากเกม (Game-Ban)")
 async def game_ban(interaction: discord.Interaction, unit: str):
     if not is_user_admin(interaction):
         return await interaction.response.send_message(f"❌ No permission. (Your ID: {interaction.user.id})", ephemeral=True)
@@ -374,7 +380,7 @@ async def ban_unit_auto(interaction: discord.Interaction, current: str):
     units = ["Minutes", "Hours", "Days", "Months", "Years", "Permanent"]
     return [app_commands.Choice(name=u, value=u) for u in units if current.lower() in u.lower()]
 
-@bot.tree.command(name="unban", description="ปลดแบนผู้เล่น")
+@bot.tree.command(name="ปลดแบน", description="ปลดแบนผู้เล่น (Unban)")
 async def unban_cmd(interaction: discord.Interaction, username: str):
     if not is_user_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
