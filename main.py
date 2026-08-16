@@ -404,11 +404,14 @@ async def root(): return {"status": "online"}
 
 @app.get("/check-ban/{roblox_id}")
 async def check_ban_ep(roblox_id: str):
+    print(f"[BanCheck] Checking status for Roblox ID: {roblox_id}")
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
     if row:
+        print(f"[BanCheck] Found ban for {roblox_id}: {row['reason']}")
         return {"banned": True, "reason": row["reason"], "status": row["status"]}
+    print(f"[BanCheck] No ban found for {roblox_id}")
     return {"banned": False}
 
 @app.post("/verify")
