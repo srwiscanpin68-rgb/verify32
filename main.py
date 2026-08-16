@@ -20,6 +20,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 DB_PATH = os.getenv("DB_PATH", "database.db")
 ALLOWED_BAN_CHANNEL_ID = 1538165546145677382
+ALLOWED_ADMIN_IDS = [1284107691723067454]  # ใส่ Discord User ID ของแอดมินที่ต้องการที่นี่
 
 DEFAULT_SETTINGS = {
     "roblox_group_id": 726824718,
@@ -354,7 +355,6 @@ async def setup_t(interaction: discord.Interaction):
     await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
-@app_commands.default_permissions(administrator=True)
 @app_commands.choices(unit=[
     app_commands.Choice(name="Minutes", value="Minutes"),
     app_commands.Choice(name="Hours", value="Hours"),
@@ -364,15 +364,26 @@ async def setup_t(interaction: discord.Interaction):
     app_commands.Choice(name="Permanent", value="Permanent"),
 ])
 async def game_ban(interaction: discord.Interaction, unit: str):
+    # Check if user is in admin list OR is an administrator
+    is_admin = interaction.user.id in ALLOWED_ADMIN_IDS or interaction.user.guild_permissions.administrator
+    if not is_admin:
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+        
     if interaction.channel_id != ALLOWED_BAN_CHANNEL_ID:
         await interaction.response.send_message(f"❌ This command can only be used in <#{ALLOWED_BAN_CHANNEL_ID}>", ephemeral=True)
         return
     await interaction.response.send_modal(GameBanModal(unit))
 
 @bot.tree.command(name="unban", description="Unban a player from the game")
-@app_commands.default_permissions(administrator=True)
 @app_commands.describe(username="Roblox username to unban")
 async def unban_cmd(interaction: discord.Interaction, username: str):
+    # Check if user is in admin list OR is an administrator
+    is_admin = interaction.user.id in ALLOWED_ADMIN_IDS or interaction.user.guild_permissions.administrator
+    if not is_admin:
+        await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        return
+
     await interaction.response.defer(ephemeral=True)
     rid = get_roblox_id_by_name(username)
     if not rid:
