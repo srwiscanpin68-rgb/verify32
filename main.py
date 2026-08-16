@@ -32,7 +32,7 @@ DEFAULT_SETTINGS = {
     "ticket_category_id": None,
     "ticket_image_url": None,
     "verified_emoji": "✅",
-    "admin_ids": "1478835050794586115", # ID แอดมินหรือยศ คั่นด้วย ;
+    "admin_ids": "", # เพิ่มเติมสำหรับคนที่ไม่ใช่แอดมินแต่อยากให้ใช้ได้
     "role_ids": {
         "or": 1479699133001629797,
         "of_low": 1479699314078122094,
@@ -90,19 +90,21 @@ def get_safe_emoji(emoji_str):
     return emoji_str
 
 # =========================
-# PERMISSION CHECK
+# PERMISSION CHECK (Simplified)
 # =========================
-def is_user_admin(interaction: discord.Interaction):
-    settings = get_guild_settings(interaction.guild_id)
+def is_admin(interaction: discord.Interaction):
+    # Anyone with Administrator permission can use everything
     if interaction.user.guild_permissions.administrator: return True
-    staff_role_id = parse_id(settings.get("ticket_staff_role_id"))
-    if staff_role_id and any(r.id == staff_role_id for r in interaction.user.roles): return True
+    
+    # Check custom whitelist
+    settings = get_guild_settings(interaction.guild_id)
     admin_str = str(settings.get("admin_ids", ""))
     admin_list = [x.strip() for x in admin_str.split(";") if x.strip()]
+    
     uid = str(interaction.user.id)
     user_role_ids = [str(r.id) for r in interaction.user.roles]
-    if uid in admin_list: return True
-    if any(rid in admin_list for rid in user_role_ids): return True
+    
+    if uid in admin_list or any(rid in admin_list for rid in user_role_ids): return True
     return False
 
 # =========================
@@ -295,28 +297,28 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
 # SLASH COMMANDS
 # =========================
 @bot.tree.command(name="ยืนยันตัวตน", description="Create verification panel")
-@app_commands.default_permissions(administrator=True)
 async def setup_v(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
     embed = discord.Embed(title="🛡️ Roblox Verification", description="Click the button below to verify your account.", color=0x3498DB)
     await interaction.channel.send(embed=embed, view=MainVerifyView(settings.get("verified_emoji", "✅")))
     await interaction.response.send_message("✅ Panel created.", ephemeral=True)
 
 @bot.tree.command(name="ล้างข้อมูล", description="Clear user data")
-@app_commands.default_permissions(administrator=True)
 async def clear_u(interaction: discord.Interaction, user: discord.Member):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM users WHERE discord_id = ?", (str(user.id),))
     await interaction.response.send_message(f"✅ Cleared data for {user.mention}", ephemeral=True)
 
 @bot.tree.command(name="ล้างข้อมูลทั้งหมด", description="Clear all user data")
-@app_commands.default_permissions(administrator=True)
 async def clear_all(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM users")
     await interaction.response.send_message("✅ All user data cleared.", ephemeral=True)
 
 @bot.tree.command(name="ใส่โรล", description="Set server roles")
-@app_commands.default_permissions(administrator=True)
 async def set_role(interaction: discord.Interaction, type: str, role: discord.Role):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id)
     if type in ["verified", "developer", "staff"]: s[f"{type}_role_id"] = role.id
     elif type in ["or", "of_low", "of_high", "guest"]: s["role_ids"][type] = role.id
@@ -329,34 +331,31 @@ async def role_type_auto(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=t, value=t) for t in types if current.lower() in t.lower()]
 
 @bot.tree.command(name="ใส่คำนำหน้า", description="Set rank prefix")
-@app_commands.default_permissions(administrator=True)
 async def set_prefix(interaction: discord.Interaction, rank_id: str, prefix: str):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id); s["rank_prefixes"][rank_id] = prefix; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Set rank {rank_id} prefix to {prefix}", ephemeral=True)
 
 @bot.tree.command(name="ดูการตั้งค่า", description="View current settings")
-@app_commands.default_permissions(administrator=True)
 async def view_settings(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id)
     text = f"**Group ID:** {s['roblox_group_id']}\n**Staff Role:** <@&{s['ticket_staff_role_id']}>\n**Admin IDs:** {s['admin_ids']}\n**Ban Channel:** <#{s['allowed_ban_channel_id']}>"
     await interaction.response.send_message(text, ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าticket", description="Create ticket panel")
-@app_commands.default_permissions(administrator=True)
 async def setup_t(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
     await interaction.channel.send(embed=embed, view=TicketSetupView())
     await interaction.response.send_message("✅ Ticket panel created.", ephemeral=True)
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
 async def game_ban(interaction: discord.Interaction, unit: str):
-    if not is_user_admin(interaction):
-        await interaction.response.send_message(f"❌ No permission. (Your ID: {interaction.user.id})", ephemeral=True)
-        return
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id)
     if interaction.channel_id != parse_id(s.get("allowed_ban_channel_id", 0)):
-        await interaction.response.send_message(f"❌ Use in <#{s.get('allowed_ban_channel_id')}>", ephemeral=True)
-        return
+        return await interaction.response.send_message(f"❌ Use in <#{s.get('allowed_ban_channel_id')}>", ephemeral=True)
     await interaction.response.send_modal(GameBanModal(unit))
 
 @game_ban.autocomplete("unit")
@@ -366,14 +365,10 @@ async def ban_unit_auto(interaction: discord.Interaction, current: str):
 
 @bot.tree.command(name="unban", description="Unban a player")
 async def unban_cmd(interaction: discord.Interaction, username: str):
-    if not is_user_admin(interaction):
-        await interaction.response.send_message(f"❌ No permission. (Your ID: {interaction.user.id})", ephemeral=True)
-        return
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     rid = get_roblox_id_by_name(username)
-    if not rid:
-        await interaction.followup.send(f"❌ User {username} not found.", ephemeral=True)
-        return
+    if not rid: return await interaction.followup.send(f"❌ User {username} not found.", ephemeral=True)
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(rid),))
         if c.rowcount > 0: await interaction.followup.send(f"✅ Unbanned {username}.", ephemeral=True)
@@ -381,9 +376,7 @@ async def unban_cmd(interaction: discord.Interaction, username: str):
 
 @bot.tree.command(name="ปิดticket", description="Close ticket")
 async def close_t(interaction: discord.Interaction):
-    if not is_user_admin(interaction):
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
     ch = interaction.channel
@@ -399,6 +392,7 @@ async def close_t(interaction: discord.Interaction):
 
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask EN")
 async def ask_en(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
     embed = discord.Embed(description="Do you have any further questions? If not, the staff will proceed to close this ticket.", color=0x3498DB)
     if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
@@ -407,6 +401,7 @@ async def ask_en(interaction: discord.Interaction):
 
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask TH")
 async def ask_th(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
     embed = discord.Embed(description="มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ", color=0x3498DB)
     if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
@@ -414,8 +409,8 @@ async def ask_th(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Sent.", ephemeral=True)
 
 @bot.tree.command(name="update", description="Announcement")
-@app_commands.default_permissions(administrator=True)
 async def update_cmd(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     class UpModal(discord.ui.Modal, title="Update"):
         msg = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph)
         img = discord.ui.TextInput(label="Image URL", required=False)
@@ -429,39 +424,35 @@ async def update_cmd(interaction: discord.Interaction):
     await interaction.response.send_modal(UpModal())
 
 @bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
-@app_commands.default_permissions(administrator=True)
 async def set_trans(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id); s["transcript_channel_id"] = channel.id; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
-@app_commands.default_permissions(administrator=True)
 async def set_cat(interaction: discord.Interaction, category: discord.CategoryChannel):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     s = get_guild_settings(interaction.guild_id); s["ticket_category_id"] = category.id; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Settings")
-@app_commands.default_permissions(administrator=True)
 async def cust_all(interaction: discord.Interaction):
+    if not is_admin(interaction): return await interaction.response.send_message("❌ No permission.", ephemeral=True)
     class CustModal(discord.ui.Modal, title="Settings"):
         gid = discord.ui.TextInput(label="Roblox Group ID", required=False)
+        gurl = discord.ui.TextInput(label="Roblox Group URL", required=False)
+        murl = discord.ui.TextInput(label="Roblox Map URL", required=False)
         sid = discord.ui.TextInput(label="Staff Role ID", required=False)
         admins = discord.ui.TextInput(label="Admin IDs (Separate with ;)", required=False)
-        ban_ch = discord.ui.TextInput(label="Ban Channel ID", required=False)
-        img = discord.ui.TextInput(label="Ticket Image URL", required=False)
-        pfx = discord.ui.TextInput(label="Prefixes (e.g. 1=[P];)", style=discord.TextStyle.paragraph, required=False)
         async def on_submit(self, interaction: discord.Interaction):
             s = get_guild_settings(interaction.guild_id)
             if self.gid.value: s["roblox_group_id"] = parse_id(self.gid.value)
+            if self.gurl.value: s["roblox_group_url"] = self.gurl.value.strip()
+            if self.murl.value: s["roblox_map_url"] = self.murl.value.strip()
             if self.sid.value: s["ticket_staff_role_id"] = parse_id(self.sid.value)
             if self.admins.value: s["admin_ids"] = self.admins.value.strip()
-            if self.ban_ch.value: s["allowed_ban_channel_id"] = parse_id(self.ban_ch.value)
-            if self.img.value: s["ticket_image_url"] = self.img.value.strip()
-            if self.pfx.value:
-                for i in self.pfx.value.split(";"):
-                    if "=" in i: k,v = i.split("=", 1); s["rank_prefixes"][k.strip()] = v.strip()
             save_guild_settings(interaction.guild_id, s)
-            await interaction.response.send_message("✅ Updated.", ephemeral=True)
+            await interaction.response.send_message("✅ Settings part 1 updated. Use command again for more.", ephemeral=True)
     await interaction.response.send_modal(CustModal())
 
 # =========================
