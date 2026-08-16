@@ -28,7 +28,7 @@ DEFAULT_SETTINGS = {
     "verified_role_id": 1508479215908028543,
     "developer_role_id": 1508479215995977759,
     "ticket_staff_role_id": 1508479215908028544,
-    "transcript_channel_id": None,
+    "transcript_channel_id": 1537110830871613500,
     "ticket_category_id": None,
     "ticket_image_url": None,
     "role_ids": {
@@ -38,10 +38,17 @@ DEFAULT_SETTINGS = {
         "guest": None,
     },
     "rank_prefixes": {
-        "or-1": "OR-1, PC", "or-2": "OR-2, PEC", "or-3": "OR-3, CPL", "or-4": "OR-4, SGT", "or-5": "OR-5, SSG",
-        "or-6": "OR-6/OR-7, SFC", "or-7": "OR-6/OR-7, SFC", "or-8": "OR-8/OR-9, MSG", "or-9": "OR-8/OR-9, MSG",
-        "of-1a": "OF-1A, LTP", "of-1b": "OF-1B, 1LT", "of-2": "OF-2, CPT", "of-3": "OF-3, MAJ", "of-4": "OF-4, LTC",
-        "of-5": "OF-5, COL", "of-6": "OF-6, SRCOL", "of-7": "OF-7, PMG", "of-8": "OF-8, MG", "of-9": "OF-9, GEN",
+        "1": "[P]",
+        "2": "[C]",
+        "3": "[B]",
+        "4": "[A]",
+        "5": "[S]",
+        "10": "[TRN]",
+        "20": "[DUC]",
+        "30": "[UC]",
+        "50": "[STAFF]",
+        "100": "[DHAD]",
+        "255": "[HAD]",
     },
 }
 
@@ -56,7 +63,6 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, settings_json TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS active_tickets (channel_id TEXT PRIMARY KEY, guild_id TEXT, user_id TEXT, ticket_type TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS bans (roblox_id TEXT PRIMARY KEY, roblox_username TEXT, link TEXT, reason TEXT, status TEXT, image_url TEXT, expires_at TIMESTAMP)")
-        # Migrate existing database if column missing
         try: conn.execute("ALTER TABLE bans ADD COLUMN expires_at TIMESTAMP")
         except: pass
 
@@ -135,25 +141,39 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         managed_role_ids.discard(None)
         
         roles = [r for r in member.roles if r != guild.default_role and r.id not in managed_role_ids]
-        v_role = guild.get_role(parse_id(settings.get("verified_role_id", 1508479215908028543)))
+        v_role = guild.get_role(parse_id(settings.get("verified_role_id")))
         if v_role: roles.append(v_role)
         
         rname = "Guest"
+        prefix = "[Guest]"
+        
         if is_dev:
             d_role = guild.get_role(parse_id(settings.get("developer_role_id")))
             if d_role: roles.append(d_role)
             rname = "Developer"
+            prefix = "[DEV]"
         elif is_in_group:
             r_id = settings["role_ids"].get("or" if 1<=rank_val<=7 else "of_low" if 8<=rank_val<=11 else "of_high" if 12<=rank_val<=18 else None)
             r_role = guild.get_role(parse_id(r_id))
             if r_role: roles.append(r_role)
             rname = rank_name
+            # Get prefix from settings based on rank value
+            prefix = settings["rank_prefixes"].get(str(rank_val), f"[{rank_name}]")
         else:
             g_role = guild.get_role(parse_id(settings["role_ids"].get("guest")))
             if g_role: roles.append(g_role)
 
         roles = list({r.id: r for r in roles}.values())
-        await member.edit(roles=roles)
+        
+        # New Nickname Format: [Tag] | Name
+        new_nick = f"{prefix} | {roblox_username}"
+        if len(new_nick) > 32: new_nick = new_nick[:32]
+        
+        try:
+            await member.edit(roles=roles, nick=new_nick)
+        except:
+            await member.edit(roles=roles) # Fallback if nick fails (e.g. owner)
+            
         return member.display_name, rname, None
     except discord.HTTPException as e:
         msg = "Missing Permissions" if e.code == 50013 else "Member not found" if e.code == 10007 else f"Discord Error {e.code}"
@@ -218,7 +238,7 @@ class TicketSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild, settings = interaction.guild, get_guild_settings(interaction.guild_id)
-        staff_role = guild.get_role(parse_id(settings.get("ticket_staff_role_id", 1508479215908028544)))
+        staff_role = guild.get_role(parse_id(settings.get("ticket_staff_role_id")))
         category = guild.get_channel(parse_id(settings.get("ticket_category_id")))
         overwrites = {guild.default_role: discord.PermissionOverwrite(view_channel=False), interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True), guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True)}
         if staff_role: overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
@@ -261,7 +281,7 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
 
         now = datetime.now()
         delta = None
-        expires_at = None
+        expires_ts = None
         
         if self.unit == "Minutes": delta = timedelta(minutes=val)
         elif self.unit == "Hours": delta = timedelta(hours=val)
@@ -283,7 +303,7 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
             conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                          (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
 
-        embed = discord.Embed(title="🚨 Ban : Banned", color=0xE74C3C)
+        embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
         embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
         embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
         embed.add_field(name="Reason", value=self.reason.value.strip(), inline=False)
@@ -417,7 +437,7 @@ async def cust_all(interaction: discord.Interaction):
         gid = discord.ui.TextInput(label="Roblox Group ID", required=False)
         sid = discord.ui.TextInput(label="Staff Role ID", required=False)
         img = discord.ui.TextInput(label="Ticket Image URL", required=False)
-        pfx = discord.ui.TextInput(label="Prefixes (e.g. of-3=MAJ;)", style=discord.TextStyle.paragraph, required=False)
+        pfx = discord.ui.TextInput(label="Prefixes (e.g. 1=[P];2=[C];)", style=discord.TextStyle.paragraph, required=False)
         async def on_submit(self, interaction: discord.Interaction):
             s = get_guild_settings(interaction.guild_id)
             if self.gid.value: s["roblox_group_id"] = parse_id(self.gid.value)
