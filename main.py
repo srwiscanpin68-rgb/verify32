@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 PORT = int(os.getenv("PORT", 8888))
 DB_PATH = os.getenv("DB_PATH", "database.db")
+ALLOWED_BAN_CHANNEL_ID = 1538165546145677382
 
 DEFAULT_SETTINGS = {
     "roblox_group_id": 226834839,
@@ -53,6 +54,7 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS users (discord_id TEXT PRIMARY KEY, roblox_id TEXT, roblox_username TEXT, verified INTEGER DEFAULT 0, pending_roblox_username TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, settings_json TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS active_tickets (channel_id TEXT PRIMARY KEY, guild_id TEXT, user_id TEXT, ticket_type TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS bans (roblox_id TEXT PRIMARY KEY, roblox_username TEXT, link TEXT, reason TEXT, status TEXT, image_url TEXT)")
 
 def get_guild_settings(guild_id):
     if not guild_id: return json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -103,7 +105,7 @@ def get_roblox_id_by_name(username):
     try:
         resp = requests.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [username], "excludeBannedUsers": True}, timeout=10)
         data = resp.json()
-        if data.get("data"): return data["data"][0]["id"]
+        if data.get("data"): return str(data["data"][0]["id"])
     except: pass
     return None
 
@@ -128,9 +130,7 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         managed_role_ids = {parse_id(settings.get("verified_role_id")), parse_id(settings.get("developer_role_id")), *{parse_id(v) for v in settings.get("role_ids", {}).values()}}
         managed_role_ids.discard(None)
         
-        # Keep existing roles that are not managed by this system
         roles = [r for r in member.roles if r != guild.default_role and r.id not in managed_role_ids]
-        
         v_role = guild.get_role(parse_id(settings.get("verified_role_id", 1508479215908028543)))
         if v_role: roles.append(v_role)
         
@@ -149,7 +149,7 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
             if g_role: roles.append(g_role)
 
         roles = list({r.id: r for r in roles}.values())
-        await member.edit(roles=roles) # Nickname change removed as requested
+        await member.edit(roles=roles)
         return member.display_name, rname, None
     except discord.HTTPException as e:
         msg = "Missing Permissions" if e.code == 50013 else "Member not found" if e.code == 10007 else f"Discord Error {e.code}"
@@ -229,6 +229,36 @@ class TicketSelect(discord.ui.Select):
 class TicketSetupView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None); self.add_item(TicketSelect())
 
+class GameBanModal(discord.ui.Modal, title="Game Ban System"):
+    username = discord.ui.TextInput(label="Username Roblox", placeholder="Enter Roblox username...", required=True)
+    link = discord.ui.TextInput(label="Link Roblox", placeholder="https://www.roblox.com/users/...", required=True)
+    reason = discord.ui.TextInput(label="Reason", style=discord.TextStyle.paragraph, placeholder="Reason for ban...", required=True)
+    status = discord.ui.TextInput(label="Status", placeholder="Banned / Blacklisted", required=True)
+    image_url = discord.ui.TextInput(label="ใส่ลิ้งรูป", placeholder="https://...", required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        rname = self.username.value.strip()
+        rid = get_roblox_id_by_name(rname)
+        if not rid:
+            await interaction.followup.send(f"❌ Roblox user **{rname}** not found.", ephemeral=True)
+            return
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url) VALUES (?, ?, ?, ?, ?, ?)",
+                         (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), self.status.value.strip(), self.image_url.value.strip() if self.image_url.value else None))
+
+        embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
+        embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
+        embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
+        embed.add_field(name="Reason", value=self.reason.value.strip(), inline=False)
+        embed.add_field(name="Status", value=f"🔴 {self.status.value.strip()}", inline=False)
+        if self.image_url.value:
+            embed.set_image(url=self.image_url.value.strip())
+
+        await interaction.channel.send(content="||@everyone||", embed=embed)
+        await interaction.followup.send("✅ Ban registered and executed successfully.", ephemeral=True)
+
 # =========================
 # SLASH COMMANDS
 # =========================
@@ -247,6 +277,31 @@ async def setup_t(interaction: discord.Interaction):
     embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
     await interaction.channel.send(embed=embed, view=TicketSetupView())
     await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
+
+@bot.tree.command(name="game-ban", description="Ban a player from the game")
+@app_commands.default_permissions(administrator=True)
+async def game_ban(interaction: discord.Interaction):
+    if interaction.channel_id != ALLOWED_BAN_CHANNEL_ID:
+        await interaction.response.send_message(f"❌ This command can only be used in <#{ALLOWED_BAN_CHANNEL_ID}>", ephemeral=True)
+        return
+    await interaction.response.send_modal(GameBanModal())
+
+@bot.tree.command(name="unban", description="Unban a player from the game")
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(username="Roblox username to unban")
+async def unban_cmd(interaction: discord.Interaction, username: str):
+    await interaction.response.defer(ephemeral=True)
+    rid = get_roblox_id_by_name(username)
+    if not rid:
+        await interaction.followup.send(f"❌ Roblox user **{username}** not found.", ephemeral=True)
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(rid),))
+        if cursor.rowcount > 0:
+            await interaction.followup.send(f"✅ Successfully unbanned **{username}**.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"ℹ️ **{username}** is not in the ban list.", ephemeral=True)
 
 @bot.tree.command(name="ปิดticket", description="Close current ticket and generate HTML transcript")
 @app_commands.default_permissions(administrator=True)
@@ -334,7 +389,7 @@ async def cust_all(interaction: discord.Interaction):
     await interaction.response.send_modal(CustModal())
 
 # =========================
-# WEBHOOK
+# WEBHOOK & API
 # =========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -346,6 +401,15 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def root(): return {"status": "online"}
+
+@app.get("/check-ban/{roblox_id}")
+async def check_ban_ep(roblox_id: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
+    if row:
+        return {"banned": True, "reason": row["reason"], "status": row["status"]}
+    return {"banned": False}
 
 @app.post("/verify")
 async def verify_ep(request: Request):
