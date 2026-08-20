@@ -32,13 +32,11 @@ DEFAULT_SETTINGS = {
     "ticket_category_id": None,
     "ticket_image_url": None,
     "verified_emoji": "✅",
-    "category_emojis": {
-        "verified": "✅",
-        "developer": "👨‍💻",
-        "or": "🎖️",
-        "of_low": "🏅",
-        "of_high": "👑",
-        "guest": "👤"
+    "ticket_emojis": {
+        "report_cheater": "❗",
+        "claim_reward": "⭐",
+        "general_contact": "💬",
+        "receive_award": "🎁"
     },
     "role_ids": {
         "or": 1479699133001629797,
@@ -75,10 +73,10 @@ def get_guild_settings(guild_id):
     if row:
         try:
             saved = json.loads(row[0])
-            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes", "category_emojis"}})
+            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes", "ticket_emojis"}})
             if "role_ids" in saved: settings["role_ids"].update(saved["role_ids"])
             if "rank_prefixes" in saved: settings["rank_prefixes"].update(saved["rank_prefixes"])
-            if "category_emojis" in saved: settings["category_emojis"].update(saved["category_emojis"])
+            if "ticket_emojis" in saved: settings["ticket_emojis"].update(saved["ticket_emojis"])
         except: pass
     return settings
 
@@ -195,8 +193,10 @@ class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
         if not is_in and int(rid) not in DEVELOPER_IDS:
             await interaction.followup.send(f"❌ Join our group first: {settings['roblox_group_url']}", ephemeral=True)
             return
+        # บันทึก ID ลงในฐานข้อมูลเพื่อความแม่นยำ 100%
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO users (discord_id, roblox_id, roblox_username, pending_roblox_username, verified) VALUES (?, ?, ?, ?, 0)", (str(interaction.user.id), str(rid), correct_name, correct_name.lower()))
+            conn.execute("INSERT OR REPLACE INTO users (discord_id, roblox_id, roblox_username, pending_roblox_username, verified) VALUES (?, ?, ?, ?, 0)", 
+                         (str(interaction.user.id), str(rid), correct_name, correct_name.lower()))
         embed = discord.Embed(title="Join game to verify", description=f"Username: **{correct_name}**\n[Click to join game]({settings['roblox_map_url']})", color=0x00FF00)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -231,12 +231,13 @@ class MainVerifyView(discord.ui.View):
             await interaction.response.send_modal(VerifyModal())
 
 class TicketSelect(discord.ui.Select):
-    def __init__(self):
+    def __init__(self, emojis=None):
+        if not emojis: emojis = DEFAULT_SETTINGS["ticket_emojis"]
         opts = [
-            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji="❗"),
-            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji="⭐"),
-            discord.SelectOption(label="General Contact", value="general_contact", emoji="💬"),
-            discord.SelectOption(label="Receive an award", value="receive_award", emoji="🎁"),
+            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji=get_safe_emoji(emojis.get("report_cheater", "❗"))),
+            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji=get_safe_emoji(emojis.get("claim_reward", "⭐"))),
+            discord.SelectOption(label="General Contact", value="general_contact", emoji=get_safe_emoji(emojis.get("general_contact", "💬"))),
+            discord.SelectOption(label="Receive an award", value="receive_award", emoji=get_safe_emoji(emojis.get("receive_award", "🎁"))),
         ]
         super().__init__(placeholder="Select a topic to contact", min_values=1, max_values=1, options=opts, custom_id="ticket_select_menu")
     async def callback(self, interaction: discord.Interaction):
@@ -255,7 +256,9 @@ class TicketSelect(discord.ui.Select):
         except Exception as e: await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 class TicketSetupView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None); self.add_item(TicketSelect())
+    def __init__(self, emojis=None): 
+        super().__init__(timeout=None)
+        self.add_item(TicketSelect(emojis))
 
 class GameBanModal(discord.ui.Modal, title="Game Ban System"):
     def __init__(self, unit: str):
@@ -306,31 +309,34 @@ async def setup_v(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=MainVerifyView(v_emoji))
     await interaction.followup.send("✅ Panel created.", ephemeral=True)
 
-@bot.tree.command(name="ตั้งค่าอีโมจิ", description="เปลี่ยนอีโมจิแต่ละประเภท (Administrator Only)")
+@bot.tree.command(name="ปรับแต่งอีโมจิ", description="เปลี่ยนอีโมจิที่มีอยู่ในระบบ (Administrator Only)")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(ประเภท="เลือกประเภทที่ต้องการเปลี่ยนอีโมจิ", อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji")
-@app_commands.choices(ประเภท=[
-    app_commands.Choice(name="ปุ่มกดยืนยันตัวตน", value="verified"),
-    app_commands.Choice(name="Developer", value="developer"),
-    app_commands.Choice(name="OR (Rank 1-7)", value="or"),
-    app_commands.Choice(name="OF Low (Rank 8-11)", value="of_low"),
-    app_commands.Choice(name="OF High (Rank 12-18)", value="of_high"),
-    app_commands.Choice(name="Guest", value="guest"),
+@app_commands.describe(รายการ="เลือกรายการที่ต้องการเปลี่ยนอีโมจิ", อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji")
+@app_commands.choices(รายการ=[
+    app_commands.Choice(name="ปุ่มยืนยันตัวตน", value="verified"),
+    app_commands.Choice(name="Ticket: รายงานคนโกง", value="report_cheater"),
+    app_commands.Choice(name="Ticket: รับรางวัล", value="claim_reward"),
+    app_commands.Choice(name="Ticket: ติดต่อสอบถาม", value="general_contact"),
+    app_commands.Choice(name="Ticket: รับรางวัลพิเศษ", value="receive_award"),
 ])
-async def set_emoji(interaction: discord.Interaction, ประเภท: app_commands.Choice[str], อีโมจิ: str):
+async def set_emoji(interaction: discord.Interaction, รายการ: app_commands.Choice[str], อีโมจิ: str):
     s = get_guild_settings(interaction.guild_id)
-    if ประเภท.value == "verified": s["verified_emoji"] = อีโมจิ.strip()
-    else: s["category_emojis"][ประเภท.value] = อีโมจิ.strip()
+    emoji_val = อีโมจิ.strip()
+    if รายการ.value == "verified":
+        s["verified_emoji"] = emoji_val
+    else:
+        s["ticket_emojis"][รายการ.value] = emoji_val
     save_guild_settings(interaction.guild_id, s)
-    safe_e = get_safe_emoji(อีโมจิ.strip())
-    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิสำหรับ **{ประเภท.name}** เป็น {safe_e} เรียบร้อยแล้ว!", ephemeral=True)
+    safe_e = get_safe_emoji(emoji_val)
+    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิสำหรับ **{รายการ.name}** เป็น {safe_e} เรียบร้อยแล้ว!\n*(สั่ง `/ยืนยันตัวตน` หรือ `/ตั้งค่าticket` ใหม่เพื่อดูผล)*", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าticket", description="Setup ticket panel")
 @app_commands.default_permissions(administrator=True)
 async def setup_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
+    settings = get_guild_settings(interaction.guild_id)
     embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
-    await interaction.channel.send(embed=embed, view=TicketSetupView())
+    await interaction.channel.send(embed=embed, view=TicketSetupView(settings.get("ticket_emojis")))
     await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
@@ -401,8 +407,11 @@ async def check_ban_ep(roblox_id: str):
 async def verify_ep(request: Request):
     data = await request.json(); rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
     with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row; row = conn.execute("SELECT discord_id FROM users WHERE roblox_id = ? AND verified = 0", (str(rid),)).fetchone()
-        if not row: row = conn.execute("SELECT discord_id FROM users WHERE LOWER(pending_roblox_username) = ? AND verified = 0", (rname.lower(),)).fetchone()
+        conn.row_factory = sqlite3.Row
+        # ค้นหาด้วย ID (แม่นยำที่สุด)
+        row = conn.execute("SELECT discord_id FROM users WHERE roblox_id = ? AND verified = 0", (str(rid),)).fetchone()
+        if not row: # สำรองด้วยชื่อ
+            row = conn.execute("SELECT discord_id FROM users WHERE LOWER(pending_roblox_username) = ? AND verified = 0", (rname.lower(),)).fetchone()
     if not row: return {"ok": False, "message": "Verify on Discord first!"}
     dname, rank, err = await update_member_status(row[0], rid, rname, gid)
     if dname:
