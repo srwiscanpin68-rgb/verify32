@@ -31,12 +31,18 @@ DEFAULT_SETTINGS = {
     "transcript_channel_id": 1537110830871613500,
     "ticket_category_id": None,
     "ticket_image_url": None,
-    "verified_emoji": "✅",
-    "ticket_emojis": {
-        "report_cheater": "❗",
-        "claim_reward": "⭐",
-        "general_contact": "💬",
-        "receive_award": "🎁"
+    "emojis": {
+        "verify_btn": "✅",
+        "verify_success": "✅",
+        "ticket_report": "❗",
+        "ticket_reward": "⭐",
+        "ticket_contact": "💬",
+        "ticket_award": "🎁",
+        "ban_status": "🔴",
+        "ban_expiry": "📅",
+        "info": "ℹ️",
+        "folder": "📁",
+        "lock": "🔒"
     },
     "role_ids": {
         "or": 1479699133001629797,
@@ -73,10 +79,10 @@ def get_guild_settings(guild_id):
     if row:
         try:
             saved = json.loads(row[0])
-            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes", "ticket_emojis"}})
+            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes", "emojis"}})
             if "role_ids" in saved: settings["role_ids"].update(saved["role_ids"])
             if "rank_prefixes" in saved: settings["rank_prefixes"].update(saved["rank_prefixes"])
-            if "ticket_emojis" in saved: settings["ticket_emojis"].update(saved["ticket_emojis"])
+            if "emojis" in saved: settings["emojis"].update(saved["emojis"])
         except: pass
     return settings
 
@@ -193,7 +199,6 @@ class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
         if not is_in and int(rid) not in DEVELOPER_IDS:
             await interaction.followup.send(f"❌ Join our group first: {settings['roblox_group_url']}", ephemeral=True)
             return
-        # บันทึก ID ลงในฐานข้อมูลเพื่อความแม่นยำ 100%
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO users (discord_id, roblox_id, roblox_username, pending_roblox_username, verified) VALUES (?, ?, ?, ?, 0)", 
                          (str(interaction.user.id), str(rid), correct_name, correct_name.lower()))
@@ -220,7 +225,7 @@ class MainVerifyView(discord.ui.View):
         
         if u and u["verified"] and u["roblox_id"]:
             settings = get_guild_settings(interaction.guild_id)
-            v_emoji = get_safe_emoji(settings.get("verified_emoji", "✅"))
+            v_emoji = get_safe_emoji(settings["emojis"].get("verify_success", "✅"))
             embed = discord.Embed(title="Verification Status", color=0x3498DB)
             embed.add_field(name="Username", value=f"**{u['roblox_username']}**", inline=False)
             embed.add_field(name="ID Roblox", value=f"**{u['roblox_id']}**", inline=False)
@@ -231,13 +236,12 @@ class MainVerifyView(discord.ui.View):
             await interaction.response.send_modal(VerifyModal())
 
 class TicketSelect(discord.ui.Select):
-    def __init__(self, emojis=None):
-        if not emojis: emojis = DEFAULT_SETTINGS["ticket_emojis"]
+    def __init__(self, emojis):
         opts = [
-            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji=get_safe_emoji(emojis.get("report_cheater", "❗"))),
-            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji=get_safe_emoji(emojis.get("claim_reward", "⭐"))),
-            discord.SelectOption(label="General Contact", value="general_contact", emoji=get_safe_emoji(emojis.get("general_contact", "💬"))),
-            discord.SelectOption(label="Receive an award", value="receive_award", emoji=get_safe_emoji(emojis.get("receive_award", "🎁"))),
+            discord.SelectOption(label="Report Cheater", value="report_cheater", emoji=get_safe_emoji(emojis.get("ticket_report", "❗"))),
+            discord.SelectOption(label="Claim Reward", value="claim_reward", emoji=get_safe_emoji(emojis.get("ticket_reward", "⭐"))),
+            discord.SelectOption(label="General Contact", value="general_contact", emoji=get_safe_emoji(emojis.get("ticket_contact", "💬"))),
+            discord.SelectOption(label="Receive an award", value="receive_award", emoji=get_safe_emoji(emojis.get("ticket_award", "🎁"))),
         ]
         super().__init__(placeholder="Select a topic to contact", min_values=1, max_values=1, options=opts, custom_id="ticket_select_menu")
     async def callback(self, interaction: discord.Interaction):
@@ -258,6 +262,7 @@ class TicketSelect(discord.ui.Select):
 class TicketSetupView(discord.ui.View):
     def __init__(self, emojis=None): 
         super().__init__(timeout=None)
+        if not emojis: emojis = DEFAULT_SETTINGS["emojis"]
         self.add_item(TicketSelect(emojis))
 
 class GameBanModal(discord.ui.Modal, title="Game Ban System"):
@@ -286,12 +291,17 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
         if delta: expires_at = now + delta; expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S"); expires_ts = expires_at.timestamp(); status_text = f"Banned for {val} {self.unit}"
         else: expires_str = "Never (Permanent)"; expires_ts = None; status_text = "Permanently Banned"
         with sqlite3.connect(DB_PATH) as conn: conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
+        
+        s = get_guild_settings(interaction.guild_id)
+        b_emoji = s["emojis"].get("ban_status", "🔴")
+        e_emoji = s["emojis"].get("ban_expiry", "📅")
+        
         embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
         embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
         embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
         embed.add_field(name="Reason", value=self.reason.value.strip(), inline=False)
-        embed.add_field(name="Status", value=f"🔴 {status_text}", inline=False)
-        embed.add_field(name="Expires At", value=f"📅 {expires_str}", inline=False)
+        embed.add_field(name="Status", value=f"{b_emoji} {status_text}", inline=False)
+        embed.add_field(name="Expires At", value=f"{e_emoji} {expires_str}", inline=False)
         if self.image_url.value: embed.set_image(url=self.image_url.value.strip())
         await interaction.channel.send(content="||@everyone||", embed=embed)
         await interaction.followup.send(f"✅ Banned {rname} until {expires_str}.", ephemeral=True)
@@ -304,7 +314,7 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
 async def setup_v(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
-    v_emoji = settings.get("verified_emoji", "✅")
+    v_emoji = settings["emojis"].get("verify_btn", "✅")
     embed = discord.Embed(title="Thai Military Verification", description="Click below to start.", color=0x2B2D31)
     await interaction.channel.send(embed=embed, view=MainVerifyView(v_emoji))
     await interaction.followup.send("✅ Panel created.", ephemeral=True)
@@ -313,22 +323,24 @@ async def setup_v(interaction: discord.Interaction):
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(รายการ="เลือกรายการที่ต้องการเปลี่ยนอีโมจิ", อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji")
 @app_commands.choices(รายการ=[
-    app_commands.Choice(name="ปุ่มยืนยันตัวตน", value="verified"),
-    app_commands.Choice(name="Ticket: รายงานคนโกง", value="report_cheater"),
-    app_commands.Choice(name="Ticket: รับรางวัล", value="claim_reward"),
-    app_commands.Choice(name="Ticket: ติดต่อสอบถาม", value="general_contact"),
-    app_commands.Choice(name="Ticket: รับรางวัลพิเศษ", value="receive_award"),
+    app_commands.Choice(name="ปุ่มยืนยันตัวตน", value="verify_btn"),
+    app_commands.Choice(name="สถานะยืนยันแล้ว", value="verify_success"),
+    app_commands.Choice(name="Ticket: รายงานคนโกง", value="ticket_report"),
+    app_commands.Choice(name="Ticket: รับรางวัล", value="ticket_reward"),
+    app_commands.Choice(name="Ticket: ติดต่อสอบถาม", value="ticket_contact"),
+    app_commands.Choice(name="Ticket: รับรางวัลพิเศษ", value="ticket_award"),
+    app_commands.Choice(name="Ban: สถานะการแบน", value="ban_status"),
+    app_commands.Choice(name="Ban: วันหมดอายุ", value="ban_expiry"),
+    app_commands.Choice(name="ข้อความแจ้งเตือน (Info)", value="info"),
+    app_commands.Choice(name="ไอคอนโฟลเดอร์ (Transcript)", value="folder"),
+    app_commands.Choice(name="ไอคอนแม่กุญแจ (Close)", value="lock"),
 ])
 async def set_emoji(interaction: discord.Interaction, รายการ: app_commands.Choice[str], อีโมจิ: str):
     s = get_guild_settings(interaction.guild_id)
-    emoji_val = อีโมจิ.strip()
-    if รายการ.value == "verified":
-        s["verified_emoji"] = emoji_val
-    else:
-        s["ticket_emojis"][รายการ.value] = emoji_val
+    s["emojis"][รายการ.value] = อีโมจิ.strip()
     save_guild_settings(interaction.guild_id, s)
-    safe_e = get_safe_emoji(emoji_val)
-    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิสำหรับ **{รายการ.name}** เป็น {safe_e} เรียบร้อยแล้ว!\n*(สั่ง `/ยืนยันตัวตน` หรือ `/ตั้งค่าticket` ใหม่เพื่อดูผล)*", ephemeral=True)
+    safe_e = get_safe_emoji(อีโมจิ.strip())
+    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิสำหรับ **{รายการ.name}** เป็น {safe_e} เรียบร้อยแล้ว!", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าticket", description="Setup ticket panel")
 @app_commands.default_permissions(administrator=True)
@@ -336,7 +348,7 @@ async def setup_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
     embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
-    await interaction.channel.send(embed=embed, view=TicketSetupView(settings.get("ticket_emojis")))
+    await interaction.channel.send(embed=embed, view=TicketSetupView(settings.get("emojis")))
     await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
@@ -352,22 +364,32 @@ async def unban_cmd(interaction: discord.Interaction, username: str):
     await interaction.response.defer(ephemeral=True)
     rid, _ = get_roblox_info_by_name(username)
     if not rid: await interaction.followup.send(f"❌ Not found.", ephemeral=True); return
+    
+    s = get_guild_settings(interaction.guild_id)
+    v_emoji = s["emojis"].get("verify_success", "✅")
+    i_emoji = s["emojis"].get("info", "ℹ️")
+    
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(rid),))
-        if cursor.rowcount > 0: await interaction.followup.send(f"✅ Unbanned **{username}**.", ephemeral=True)
-        else: await interaction.followup.send(f"ℹ️ Not in ban list.", ephemeral=True)
+        if cursor.rowcount > 0: await interaction.followup.send(f"{v_emoji} Successfully unbanned **{username}**.", ephemeral=True)
+        else: await interaction.followup.send(f"{i_emoji} **{username}** is not in the ban list.", ephemeral=True)
 
 @bot.tree.command(name="ปิดticket", description="Close ticket")
 @app_commands.default_permissions(administrator=True)
 async def close_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True); s = get_guild_settings(interaction.guild_id); ch = interaction.channel
+    f_emoji = s["emojis"].get("folder", "📁")
+    l_emoji = s["emojis"].get("lock", "🔒")
+    
     html = f"<html><body><h1>Transcript: {ch.name}</h1>"
     async for m in ch.history(limit=1000, oldest_first=True): html += f"<p><b>{m.author.display_name}</b>: {m.clean_content}</p>"
     html += "</body></html>"
     file = discord.File(io.BytesIO(html.encode()), filename=f"transcript-{ch.name}.html")
     t_ch = interaction.guild.get_channel(parse_id(s.get("transcript_channel_id")))
-    if t_ch: await t_ch.send(file=file)
-    await interaction.followup.send("🔒 Closing..."); await asyncio.sleep(3); await ch.delete()
+    if t_ch: await t_ch.send(content=f"{f_emoji} Transcript: `{ch.name}`", file=file)
+    await interaction.followup.send(f"{l_emoji} Closing in 3s...", ephemeral=True)
+    with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(ch.id),))
+    await asyncio.sleep(3); await ch.delete()
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Customize settings")
 @app_commands.default_permissions(administrator=True)
@@ -392,16 +414,6 @@ async def lifespan(app: FastAPI): init_db(); asyncio.create_task(bot.start(DISCO
 app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root(): return {"status": "online"}
-@app.get("/check-ban/{roblox_id}")
-async def check_ban_ep(roblox_id: str):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row; row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
-    if row:
-        if row["expires_at"] and datetime.now().timestamp() > row["expires_at"]:
-            with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(roblox_id),))
-            return {"banned": False}
-        return {"banned": True, "reason": row["reason"], "status": row["status"]}
-    return {"banned": False}
 
 @app.post("/verify")
 async def verify_ep(request: Request):
