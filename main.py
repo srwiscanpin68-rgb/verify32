@@ -31,7 +31,15 @@ DEFAULT_SETTINGS = {
     "transcript_channel_id": 1537110830871613500,
     "ticket_category_id": None,
     "ticket_image_url": None,
-    "verified_emoji": "✅",  # เพิ่มการตั้งค่าอีโมจิ
+    "verified_emoji": "✅",
+    "category_emojis": {
+        "verified": "✅",
+        "developer": "👨‍💻",
+        "or": "🎖️",
+        "of_low": "🏅",
+        "of_high": "👑",
+        "guest": "👤"
+    },
     "role_ids": {
         "or": 1479699133001629797,
         "of_low": 1479699314078122094,
@@ -39,17 +47,9 @@ DEFAULT_SETTINGS = {
         "guest": None,
     },
     "rank_prefixes": {
-        "1": "[P]",
-        "2": "[C]",
-        "3": "[B]",
-        "4": "[A]",
-        "5": "[S]",
-        "10": "[TRN]",
-        "20": "[DUC]",
-        "30": "[UC]",
-        "50": "[STAFF]",
-        "100": "[DHAD]",
-        "255": "[HAD]",
+        "1": "[P]", "2": "[C]", "3": "[B]", "4": "[A]", "5": "[S]",
+        "10": "[TRN]", "20": "[DUC]", "30": "[UC]", "50": "[STAFF]",
+        "100": "[DHAD]", "255": "[HAD]",
     },
 }
 
@@ -75,9 +75,10 @@ def get_guild_settings(guild_id):
     if row:
         try:
             saved = json.loads(row[0])
-            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes"}})
+            settings.update({k: v for k, v in saved.items() if k not in {"role_ids", "rank_prefixes", "category_emojis"}})
             if "role_ids" in saved: settings["role_ids"].update(saved["role_ids"])
             if "rank_prefixes" in saved: settings["rank_prefixes"].update(saved["rank_prefixes"])
+            if "category_emojis" in saved: settings["category_emojis"].update(saved["category_emojis"])
         except: pass
     return settings
 
@@ -92,11 +93,10 @@ def parse_id(value):
     return int(match.group()) if match else None
 
 def get_safe_emoji(emoji_str):
-    """ฟังก์ชันแปลงอีโมจิให้รองรับทั้ง Emoji ธรรมดา และ Custom Emoji โดยไม่เกิด Error"""
     if not emoji_str: return "✅"
     if isinstance(emoji_str, str) and emoji_str.startswith("<") and emoji_str.endswith(">"):
         try: return discord.PartialEmoji.from_str(emoji_str)
-        except Exception: return "✅"
+        except: return "✅"
     return emoji_str
 
 # =========================
@@ -120,13 +120,13 @@ bot = MyBot()
 # =========================
 # UTILS
 # =========================
-def get_roblox_id_by_name(username):
+def get_roblox_info_by_name(username):
     try:
         resp = requests.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [username], "excludeBannedUsers": True}, timeout=10)
         data = resp.json()
-        if data.get("data"): return str(data["data"][0]["id"])
+        if data.get("data"): return str(data["data"][0]["id"]), data["data"][0]["name"]
     except: pass
-    return None
+    return None, None
 
 def check_group_membership(roblox_id, group_id):
     try:
@@ -153,14 +153,11 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         v_role = guild.get_role(parse_id(settings.get("verified_role_id")))
         if v_role: roles.append(v_role)
         
-        rname = "Guest"
-        prefix = "[Guest]"
-        
+        rname, prefix = "Guest", "[Guest]"
         if is_dev:
             d_role = guild.get_role(parse_id(settings.get("developer_role_id")))
             if d_role: roles.append(d_role)
-            rname = "Developer"
-            prefix = "[DEV]"
+            rname, prefix = "Developer", "[DEV]"
         elif is_in_group:
             r_id = settings["role_ids"].get("or" if 1<=rank_val<=7 else "of_low" if 8<=rank_val<=11 else "of_high" if 12<=rank_val<=18 else None)
             r_role = guild.get_role(parse_id(r_id))
@@ -174,10 +171,8 @@ async def update_member_status(discord_id, roblox_id, roblox_username, guild_id=
         roles = list({r.id: r for r in roles}.values())
         new_nick = f"{prefix} | {roblox_username}"
         if len(new_nick) > 32: new_nick = new_nick[:32]
-        
         try: await member.edit(roles=roles, nick=new_nick)
         except: await member.edit(roles=roles)
-            
         return member.display_name, rname, None
     except discord.HTTPException as e:
         msg = "Missing Permissions" if e.code == 50013 else "Member not found" if e.code == 10007 else f"Discord Error {e.code}"
@@ -191,7 +186,7 @@ class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
     username = discord.ui.TextInput(label="Roblox Username", placeholder="Enter username...", min_length=3, max_length=20, required=True)
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        rid = get_roblox_id_by_name(self.username.value)
+        rid, correct_name = get_roblox_info_by_name(self.username.value.strip())
         if not rid:
             await interaction.followup.send(f"❌ Roblox username **{self.username.value}** not found.", ephemeral=True)
             return
@@ -201,8 +196,8 @@ class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
             await interaction.followup.send(f"❌ Join our group first: {settings['roblox_group_url']}", ephemeral=True)
             return
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO users (discord_id, pending_roblox_username, verified) VALUES (?, ?, 0)", (str(interaction.user.id), self.username.value.strip().lower()))
-        embed = discord.Embed(title="Join game to verify", description=f"Username: **{self.username.value}**\n[Click to join game]({settings['roblox_map_url']})", color=0x00FF00)
+            conn.execute("INSERT OR REPLACE INTO users (discord_id, roblox_id, roblox_username, pending_roblox_username, verified) VALUES (?, ?, ?, ?, 0)", (str(interaction.user.id), str(rid), correct_name, correct_name.lower()))
+        embed = discord.Embed(title="Join game to verify", description=f"Username: **{correct_name}**\n[Click to join game]({settings['roblox_map_url']})", color=0x00FF00)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 class ChangeAccountButton(discord.ui.Button):
@@ -230,8 +225,7 @@ class MainVerifyView(discord.ui.View):
             embed.add_field(name="Username", value=f"**{u['roblox_username']}**", inline=False)
             embed.add_field(name="ID Roblox", value=f"**{u['roblox_id']}**", inline=False)
             embed.add_field(name="Status", value=f"{v_emoji} Verified", inline=False)
-            view = discord.ui.View()
-            view.add_item(ChangeAccountButton())
+            view = discord.ui.View(); view.add_item(ChangeAccountButton())
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
             await interaction.response.send_modal(VerifyModal())
@@ -269,45 +263,26 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
         self.unit = unit
         self.duration_val = discord.ui.TextInput(label=f"Number of {unit} to ban", placeholder="Enter a number (e.g. 7)", required=True)
         self.add_item(self.duration_val)
-
     username = discord.ui.TextInput(label="Username Roblox", placeholder="Enter Roblox username...", required=True)
     link = discord.ui.TextInput(label="Link Roblox", placeholder="https://www.roblox.com/users/...", required=True)
     reason = discord.ui.TextInput(label="Reason", style=discord.TextStyle.paragraph, placeholder="Reason for ban...", required=True)
     image_url = discord.ui.TextInput(label="ใส่ลิ้งรูป", placeholder="https://...", required=False)
-
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         rname = self.username.value.strip()
-        rid = get_roblox_id_by_name(rname)
-        if not rid:
-            await interaction.followup.send(f"❌ Roblox user **{rname}** not found.", ephemeral=True)
-            return
-
+        rid, _ = get_roblox_info_by_name(rname)
+        if not rid: await interaction.followup.send(f"❌ Roblox user **{rname}** not found.", ephemeral=True); return
         try: val = int(self.duration_val.value.strip())
-        except ValueError:
-            await interaction.followup.send("❌ Please enter a valid number for duration.", ephemeral=True)
-            return
-
-        now = datetime.now()
-        delta = None
+        except: await interaction.followup.send("❌ Invalid duration.", ephemeral=True); return
+        now = datetime.now(); delta = None
         if self.unit == "Minutes": delta = timedelta(minutes=val)
         elif self.unit == "Hours": delta = timedelta(hours=val)
         elif self.unit == "Days": delta = timedelta(days=val)
         elif self.unit == "Months": delta = timedelta(days=val*30)
         elif self.unit == "Years": delta = timedelta(days=val*365)
-        
-        if delta:
-            expires_at = now + delta
-            expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S")
-            expires_ts = expires_at.timestamp()
-            status_text = f"Banned for {val} {self.unit}"
-        else:
-            expires_str = "Never (Permanent)"; expires_ts = None; status_text = "Permanently Banned"
-
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                         (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
-
+        if delta: expires_at = now + delta; expires_str = expires_at.strftime("%Y-%m-%d %H:%M:%S"); expires_ts = expires_at.timestamp(); status_text = f"Banned for {val} {self.unit}"
+        else: expires_str = "Never (Permanent)"; expires_ts = None; status_text = "Permanently Banned"
+        with sqlite3.connect(DB_PATH) as conn: conn.execute("INSERT OR REPLACE INTO bans (roblox_id, roblox_username, link, reason, status, image_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (str(rid), rname, self.link.value.strip(), self.reason.value.strip(), status_text, self.image_url.value.strip() if self.image_url.value else None, expires_ts))
         embed = discord.Embed(title="🚨 Update : ระบบADMIN", color=0xE74C3C)
         embed.add_field(name="Username Roblox", value=f"**{rname}**", inline=False)
         embed.add_field(name="Link Roblox", value=f"[Click Profile]({self.link.value.strip()})", inline=False)
@@ -315,7 +290,6 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
         embed.add_field(name="Status", value=f"🔴 {status_text}", inline=False)
         embed.add_field(name="Expires At", value=f"📅 {expires_str}", inline=False)
         if self.image_url.value: embed.set_image(url=self.image_url.value.strip())
-
         await interaction.channel.send(content="||@everyone||", embed=embed)
         await interaction.followup.send(f"✅ Banned {rname} until {expires_str}.", ephemeral=True)
 
@@ -332,18 +306,24 @@ async def setup_v(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=MainVerifyView(v_emoji))
     await interaction.followup.send("✅ Panel created.", ephemeral=True)
 
-@bot.tree.command(name="ตั้งค่าอีโมจิ", description="เปลี่ยนอีโมจิกดยืนยันตัวตนของเซิร์ฟเวอร์นี้ (Administrator Only)")
+@bot.tree.command(name="ตั้งค่าอีโมจิ", description="เปลี่ยนอีโมจิแต่ละประเภท (Administrator Only)")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji เช่น <:name:ID>")
-async def set_emoji(interaction: discord.Interaction, อีโมจิ: str):
-    if not interaction.guild_id:
-        await interaction.response.send_message("❌ คำสั่งนี้ต้องใช้ภายใน Server เท่านั้น", ephemeral=True)
-        return
-    settings = get_guild_settings(interaction.guild_id)
-    settings["verified_emoji"] = อีโมจิ.strip()
-    save_guild_settings(interaction.guild_id, settings)
-    safe_e = get_safe_emoji(settings["verified_emoji"])
-    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิยืนยันตัวตนเป็น {safe_e} เรียบร้อยแล้ว!\n*(พิมพ์ `/ยืนยันตัวตน` อีกครั้งเพื่อส่งปุ่มกดด้วยอีโมจิใหม่)*", ephemeral=True)
+@app_commands.describe(ประเภท="เลือกประเภทที่ต้องการเปลี่ยนอีโมจิ", อีโมจิ="ใส่อีโมจิธรรมดา หรือ Custom Emoji")
+@app_commands.choices(ประเภท=[
+    app_commands.Choice(name="ปุ่มกดยืนยันตัวตน", value="verified"),
+    app_commands.Choice(name="Developer", value="developer"),
+    app_commands.Choice(name="OR (Rank 1-7)", value="or"),
+    app_commands.Choice(name="OF Low (Rank 8-11)", value="of_low"),
+    app_commands.Choice(name="OF High (Rank 12-18)", value="of_high"),
+    app_commands.Choice(name="Guest", value="guest"),
+])
+async def set_emoji(interaction: discord.Interaction, ประเภท: app_commands.Choice[str], อีโมจิ: str):
+    s = get_guild_settings(interaction.guild_id)
+    if ประเภท.value == "verified": s["verified_emoji"] = อีโมจิ.strip()
+    else: s["category_emojis"][ประเภท.value] = อีโมจิ.strip()
+    save_guild_settings(interaction.guild_id, s)
+    safe_e = get_safe_emoji(อีโมจิ.strip())
+    await interaction.response.send_message(f"✅ ตั้งค่าอีโมจิสำหรับ **{ประเภท.name}** เป็น {safe_e} เรียบร้อยแล้ว!", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าticket", description="Setup ticket panel")
 @app_commands.default_permissions(administrator=True)
@@ -355,91 +335,33 @@ async def setup_t(interaction: discord.Interaction):
 
 @bot.tree.command(name="game-ban", description="Ban a player from the game")
 @app_commands.default_permissions(administrator=True)
-@app_commands.choices(unit=[
-    app_commands.Choice(name="Minutes", value="Minutes"),
-    app_commands.Choice(name="Hours", value="Hours"),
-    app_commands.Choice(name="Days", value="Days"),
-    app_commands.Choice(name="Months", value="Months"),
-    app_commands.Choice(name="Years", value="Years"),
-    app_commands.Choice(name="Permanent", value="Permanent"),
-])
+@app_commands.choices(unit=[app_commands.Choice(name=u, value=u) for u in ["Minutes", "Hours", "Days", "Months", "Years", "Permanent"]])
 async def game_ban(interaction: discord.Interaction, unit: str):
-    if interaction.channel_id != ALLOWED_BAN_CHANNEL_ID:
-        await interaction.response.send_message(f"❌ This command can only be used in <#{ALLOWED_BAN_CHANNEL_ID}>", ephemeral=True)
-        return
+    if interaction.channel_id != ALLOWED_BAN_CHANNEL_ID: await interaction.response.send_message(f"❌ Only in <#{ALLOWED_BAN_CHANNEL_ID}>", ephemeral=True); return
     await interaction.response.send_modal(GameBanModal(unit))
 
-@bot.tree.command(name="unban", description="Unban a player from the game")
+@bot.tree.command(name="unban", description="Unban a player")
 @app_commands.default_permissions(administrator=True)
-@app_commands.describe(username="Roblox username to unban")
 async def unban_cmd(interaction: discord.Interaction, username: str):
     await interaction.response.defer(ephemeral=True)
-    rid = get_roblox_id_by_name(username)
-    if not rid:
-        await interaction.followup.send(f"❌ Roblox user **{username}** not found.", ephemeral=True)
-        return
+    rid, _ = get_roblox_info_by_name(username)
+    if not rid: await interaction.followup.send(f"❌ Not found.", ephemeral=True); return
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(rid),))
-        if cursor.rowcount > 0: await interaction.followup.send(f"✅ Successfully unbanned **{username}**.", ephemeral=True)
-        else: await interaction.followup.send(f"ℹ️ **{username}** is not in the ban list.", ephemeral=True)
+        if cursor.rowcount > 0: await interaction.followup.send(f"✅ Unbanned **{username}**.", ephemeral=True)
+        else: await interaction.followup.send(f"ℹ️ Not in ban list.", ephemeral=True)
 
-@bot.tree.command(name="ปิดticket", description="Close current ticket and generate HTML transcript")
+@bot.tree.command(name="ปิดticket", description="Close ticket")
 @app_commands.default_permissions(administrator=True)
 async def close_t(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    settings = get_guild_settings(interaction.guild_id)
-    channel = interaction.channel
-    html_content = f"<html><head><meta charset='utf-8'><style>body {{ background-color: #36393f; color: #dcddde; font-family: sans-serif; padding: 20px; }} .msg {{ display: flex; margin-bottom: 15px; }} .avatar {{ width: 40px; height: 40px; border-radius: 50%; margin-right: 15px; background-color: #4f545c; }} .author {{ font-weight: bold; color: #ffffff; margin-right: 10px; }} .time {{ font-size: 0.75rem; color: #72767d; }}</style></head><body><h1>Transcript: {channel.name}</h1>"
-    async for m in channel.history(limit=1000, oldest_first=True):
-        html_content += f"<div class='msg'><img class='avatar' src='{m.author.display_avatar.url}'><div class='content'><div class='header'><span class='author'>{m.author.display_name}</span><span class='time'>{m.created_at.strftime('%Y-%m-%d %H:%M')}</span></div><div class='text'>{m.clean_content or '[Attachment]'}</div></div></div>"
-    html_content += "</body></html>"
-    file = discord.File(io.BytesIO(html_content.encode()), filename=f"transcript-{channel.name}.html")
-    t_ch = interaction.guild.get_channel(parse_id(settings.get("transcript_channel_id")))
-    if t_ch: await t_ch.send(content=f"📁 Transcript: `{channel.name}`", file=file)
-    await interaction.followup.send("🔒 Closing in 3s...", ephemeral=True)
-    with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(channel.id),))
-    await asyncio.sleep(3); await channel.delete()
-
-async def send_ask_more_embed(interaction, text):
-    settings = get_guild_settings(interaction.guild_id)
-    embed = discord.Embed(description=text, color=0x3498DB)
-    if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
-    await interaction.channel.send(embed=embed)
-    await interaction.response.send_message("✅ Sent.", ephemeral=True)
-
-@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask for more questions (EN)")
-async def ask_en(interaction: discord.Interaction): await send_ask_more_embed(interaction, "Do you have any further questions? If not, the staff will proceed to close this ticket.")
-
-@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask for more questions (TH)")
-async def ask_th(interaction: discord.Interaction): await send_ask_more_embed(interaction, "มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ")
-
-class UpdateModal(discord.ui.Modal, title="System Announcement"):
-    message = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, placeholder="Enter announcement message...", required=True)
-    image_url = discord.ui.TextInput(label="Image URL (Optional)", style=discord.TextStyle.short, placeholder="https://...", required=False)
-    note = discord.ui.TextInput(label="Note (Optional)", style=discord.TextStyle.short, placeholder="Small note at the bottom...", required=False)
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        embed = discord.Embed(description=self.message.value, color=0x3498DB)
-        if self.image_url.value: embed.set_image(url=self.image_url.value.strip())
-        if self.note.value: embed.add_field(name="\u200b", value=f"-# {self.note.value.strip()}", inline=False)
-        await interaction.channel.send(content="||@everyone||", embed=embed)
-        await interaction.followup.send("✅ Announcement sent successfully.", ephemeral=True)
-
-@bot.tree.command(name="update", description="Send announcement update via modal")
-@app_commands.default_permissions(administrator=True)
-async def update_cmd(interaction: discord.Interaction): await interaction.response.send_modal(UpdateModal())
-
-@bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
-@app_commands.default_permissions(administrator=True)
-async def set_trans(interaction: discord.Interaction, channel: discord.TextChannel):
-    s = get_guild_settings(interaction.guild_id); s["transcript_channel_id"] = channel.id; save_guild_settings(interaction.guild_id, s)
-    await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
-
-@bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
-@app_commands.default_permissions(administrator=True)
-async def set_cat(interaction: discord.Interaction, category: discord.CategoryChannel):
-    s = get_guild_settings(interaction.guild_id); s["ticket_category_id"] = category.id; save_guild_settings(interaction.guild_id, s)
-    await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
+    await interaction.response.defer(ephemeral=True); s = get_guild_settings(interaction.guild_id); ch = interaction.channel
+    html = f"<html><body><h1>Transcript: {ch.name}</h1>"
+    async for m in ch.history(limit=1000, oldest_first=True): html += f"<p><b>{m.author.display_name}</b>: {m.clean_content}</p>"
+    html += "</body></html>"
+    file = discord.File(io.BytesIO(html.encode()), filename=f"transcript-{ch.name}.html")
+    t_ch = interaction.guild.get_channel(parse_id(s.get("transcript_channel_id")))
+    if t_ch: await t_ch.send(file=file)
+    await interaction.followup.send("🔒 Closing..."); await asyncio.sleep(3); await ch.delete()
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Customize settings")
 @app_commands.default_permissions(administrator=True)
@@ -448,44 +370,28 @@ async def cust_all(interaction: discord.Interaction):
         gid = discord.ui.TextInput(label="Roblox Group ID", required=False)
         sid = discord.ui.TextInput(label="Staff Role ID", required=False)
         img = discord.ui.TextInput(label="Ticket Image URL", required=False)
-        pfx = discord.ui.TextInput(label="Prefixes (e.g. 1=[P];2=[C];)", style=discord.TextStyle.paragraph, required=False)
-        emoji = discord.ui.TextInput(label="Verified Emoji (e.g. ✅ or <:name:ID>)", required=False)
         async def on_submit(self, interaction: discord.Interaction):
             s = get_guild_settings(interaction.guild_id)
             if self.gid.value: s["roblox_group_id"] = parse_id(self.gid.value)
             if self.sid.value: s["ticket_staff_role_id"] = parse_id(self.sid.value)
             if self.img.value: s["ticket_image_url"] = self.img.value.strip()
-            if self.emoji.value: s["verified_emoji"] = self.emoji.value.strip()
-            if self.pfx.value:
-                for item in self.pfx.value.split(";"):
-                    if "=" in item:
-                        k,v = item.split("=", 1)
-                        s["rank_prefixes"][k.strip().lower()] = v.strip()
-            save_guild_settings(interaction.guild_id, s)
-            await interaction.response.send_message("✅ Settings updated.", ephemeral=True)
+            save_guild_settings(interaction.guild_id, s); await interaction.response.send_message("✅ Updated.", ephemeral=True)
     await interaction.response.send_modal(CustModal())
 
 # =========================
 # WEBHOOK & API
 # =========================
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db(); asyncio.create_task(bot.start(DISCORD_TOKEN))
-    yield
-    await bot.close()
-
+async def lifespan(app: FastAPI): init_db(); asyncio.create_task(bot.start(DISCORD_TOKEN)); yield; await bot.close()
 app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root(): return {"status": "online"}
-
 @app.get("/check-ban/{roblox_id}")
 async def check_ban_ep(roblox_id: str):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
+        conn.row_factory = sqlite3.Row; row = conn.execute("SELECT * FROM bans WHERE roblox_id = ?", (str(roblox_id),)).fetchone()
     if row:
-        expires_at = row["expires_at"]
-        if expires_at and datetime.now().timestamp() > expires_at:
+        if row["expires_at"] and datetime.now().timestamp() > row["expires_at"]:
             with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(roblox_id),))
             return {"banned": False}
         return {"banned": True, "reason": row["reason"], "status": row["status"]}
@@ -493,11 +399,10 @@ async def check_ban_ep(roblox_id: str):
 
 @app.post("/verify")
 async def verify_ep(request: Request):
-    data = await request.json()
-    rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
+    data = await request.json(); rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
     with sqlite3.connect(DB_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT discord_id FROM users WHERE LOWER(TRIM(pending_roblox_username)) = ? ORDER BY rowid DESC LIMIT 1", (rname.lower(),)).fetchone()
+        conn.row_factory = sqlite3.Row; row = conn.execute("SELECT discord_id FROM users WHERE roblox_id = ? AND verified = 0", (str(rid),)).fetchone()
+        if not row: row = conn.execute("SELECT discord_id FROM users WHERE LOWER(pending_roblox_username) = ? AND verified = 0", (rname.lower(),)).fetchone()
     if not row: return {"ok": False, "message": "Verify on Discord first!"}
     dname, rank, err = await update_member_status(row[0], rid, rname, gid)
     if dname:
