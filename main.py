@@ -34,6 +34,8 @@ DEFAULT_SETTINGS = {
     "emojis": {
         "verify_btn": "✅",
         "verify_success": "✅",
+        "verify_failed": "❌",
+        "ticket_header": "❗",
         "ticket_report": "❗",
         "ticket_reward": "⭐",
         "ticket_contact": "💬",
@@ -42,7 +44,10 @@ DEFAULT_SETTINGS = {
         "ban_expiry": "📅",
         "info": "ℹ️",
         "folder": "📁",
-        "lock": "🔒"
+        "lock": "🔒",
+        "success": "✅",
+        "error": "❌",
+        "loading": "⌛"
     },
     "role_ids": {
         "or": 1479699133001629797,
@@ -325,6 +330,8 @@ async def setup_v(interaction: discord.Interaction):
 @app_commands.choices(รายการ=[
     app_commands.Choice(name="ปุ่มยืนยันตัวตน", value="verify_btn"),
     app_commands.Choice(name="สถานะยืนยันแล้ว", value="verify_success"),
+    app_commands.Choice(name="สถานะยืนยันไม่สำเร็จ", value="verify_failed"),
+    app_commands.Choice(name="หัวข้อ Ticket (❗)", value="ticket_header"),
     app_commands.Choice(name="Ticket: รายงานคนโกง", value="ticket_report"),
     app_commands.Choice(name="Ticket: รับรางวัล", value="ticket_reward"),
     app_commands.Choice(name="Ticket: ติดต่อสอบถาม", value="ticket_contact"),
@@ -334,6 +341,9 @@ async def setup_v(interaction: discord.Interaction):
     app_commands.Choice(name="ข้อความแจ้งเตือน (Info)", value="info"),
     app_commands.Choice(name="ไอคอนโฟลเดอร์ (Transcript)", value="folder"),
     app_commands.Choice(name="ไอคอนแม่กุญแจ (Close)", value="lock"),
+    app_commands.Choice(name="ไอคอนสำเร็จ (Success)", value="success"),
+    app_commands.Choice(name="ไอคอนผิดพลาด (Error)", value="error"),
+    app_commands.Choice(name="ไอคอนโหลด (Loading)", value="loading"),
 ])
 async def set_emoji(interaction: discord.Interaction, รายการ: app_commands.Choice[str], อีโมจิ: str):
     s = get_guild_settings(interaction.guild_id)
@@ -347,7 +357,8 @@ async def set_emoji(interaction: discord.Interaction, รายการ: app_co
 async def setup_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     settings = get_guild_settings(interaction.guild_id)
-    embed = discord.Embed(title="❗ Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
+    h_emoji = settings["emojis"].get("ticket_header", "❗")
+    embed = discord.Embed(title=f"{h_emoji} Contact Staff / Support", description="Select a topic to open a ticket.", color=0xE74C3C)
     await interaction.channel.send(embed=embed, view=TicketSetupView(settings.get("emojis")))
     await interaction.followup.send("✅ Ticket panel created.", ephemeral=True)
 
@@ -390,6 +401,57 @@ async def close_t(interaction: discord.Interaction):
     await interaction.followup.send(f"{l_emoji} Closing in 3s...", ephemeral=True)
     with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(ch.id),))
     await asyncio.sleep(3); await ch.delete()
+
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask for more questions (EN)")
+async def ask_en(interaction: discord.Interaction):
+    s = get_guild_settings(interaction.guild_id)
+    i_emoji = s["emojis"].get("info", "ℹ️")
+    embed = discord.Embed(title=f"{i_emoji} Further Assistance", description="Do you have any further questions? If not, the staff will proceed to close this ticket.", color=0x3498DB)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="ส่งข้อความสอบถามเพิ่มเติม (ภาษาไทย)")
+async def ask_th(interaction: discord.Interaction):
+    s = get_guild_settings(interaction.guild_id)
+    i_emoji = s["emojis"].get("info", "ℹ️")
+    embed = discord.Embed(title=f"{i_emoji} สอบถามเพิ่มเติม", description="มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ", color=0x3498DB)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="update", description="Send announcement update")
+@app_commands.default_permissions(administrator=True)
+async def update_cmd(interaction: discord.Interaction, message: str):
+    s = get_guild_settings(interaction.guild_id)
+    u_emoji = s["emojis"].get("loading", "⌛")
+    embed = discord.Embed(title=f"{u_emoji} Announcement Update", description=message, color=0xF1C40F, timestamp=datetime.now())
+    await interaction.channel.send(content="@everyone", embed=embed)
+    await interaction.response.send_message("✅ Announcement sent.", ephemeral=True)
+
+@bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
+@app_commands.default_permissions(administrator=True)
+async def set_trans(interaction: discord.Interaction, channel: discord.TextChannel):
+    s = get_guild_settings(interaction.guild_id)
+    s["transcript_channel_id"] = channel.id
+    save_guild_settings(interaction.guild_id, s)
+    await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
+
+@bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
+@app_commands.default_permissions(administrator=True)
+async def set_cat(interaction: discord.Interaction, category: discord.CategoryChannel):
+    s = get_guild_settings(interaction.guild_id)
+    s["ticket_category_id"] = category.id
+    save_guild_settings(interaction.guild_id, s)
+    await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
+
+@bot.tree.command(name="อื่นๆ", description="ดูคำสั่งเพิ่มเติมอื่นๆ ของระบบ")
+async def others_cmd(interaction: discord.Interaction):
+    s = get_guild_settings(interaction.guild_id)
+    i_emoji = s["emojis"].get("info", "ℹ️")
+    embed = discord.Embed(title=f"{i_emoji} คำสั่งเพิ่มเติมอื่นๆ", color=0x95A5A6)
+    embed.add_field(name="/มีอะไรสอบถามเพิ่มเติมไหม_th", value="ส่งข้อความถามผู้ใช้ใน Ticket (ไทย)", inline=False)
+    embed.add_field(name="/มีอะไรสอบถามเพิ่มเติมไหม_en", value="ส่งข้อความถามผู้ใช้ใน Ticket (EN)", inline=False)
+    embed.add_field(name="/update", value="ส่งประกาศแจ้งเตือน @everyone", inline=False)
+    embed.add_field(name="/ตั้งค่าห้องtranscript", value="ตั้งค่าห้องเก็บประวัติ Ticket", inline=False)
+    embed.add_field(name="/ตั้งค่าหมวดหมู่ticket", value="ตั้งค่าหมวดหมู่สำหรับสร้าง Ticket", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="ปรับแต่งทั้งหมด", description="Customize settings")
 @app_commands.default_permissions(administrator=True)
