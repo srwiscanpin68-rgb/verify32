@@ -34,7 +34,6 @@ DEFAULT_SETTINGS = {
     "emojis": {
         "verify_btn": "✅",
         "verify_success": "✅",
-        "verify_failed": "❌",
         "ticket_header": "❗",
         "ticket_report": "❗",
         "ticket_reward": "⭐",
@@ -44,10 +43,7 @@ DEFAULT_SETTINGS = {
         "ban_expiry": "📅",
         "info": "ℹ️",
         "folder": "📁",
-        "lock": "🔒",
-        "success": "✅",
-        "error": "❌",
-        "loading": "⌛"
+        "lock": "🔒"
     },
     "role_ids": {
         "or": 1479699133001629797,
@@ -204,6 +200,7 @@ class VerifyModal(discord.ui.Modal, title="Roblox Verification"):
         if not is_in and int(rid) not in DEVELOPER_IDS:
             await interaction.followup.send(f"❌ Join our group first: {settings['roblox_group_url']}", ephemeral=True)
             return
+        # FIXED: บันทึก ID ลงในฐานข้อมูลเพื่อความแม่นยำ 100%
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("INSERT OR REPLACE INTO users (discord_id, roblox_id, roblox_username, pending_roblox_username, verified) VALUES (?, ?, ?, ?, 0)", 
                          (str(interaction.user.id), str(rid), correct_name, correct_name.lower()))
@@ -311,6 +308,18 @@ class GameBanModal(discord.ui.Modal, title="Game Ban System"):
         await interaction.channel.send(content="||@everyone||", embed=embed)
         await interaction.followup.send(f"✅ Banned {rname} until {expires_str}.", ephemeral=True)
 
+class UpdateModal(discord.ui.Modal, title="System Announcement"):
+    message = discord.ui.TextInput(label="Message", style=discord.TextStyle.paragraph, placeholder="Enter announcement message...", required=True)
+    image_url = discord.ui.TextInput(label="Image URL (Optional)", style=discord.TextStyle.short, placeholder="https://...", required=False)
+    note = discord.ui.TextInput(label="Note (Optional)", style=discord.TextStyle.short, placeholder="Small note at the bottom...", required=False)
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        embed = discord.Embed(description=self.message.value, color=0x3498DB)
+        if self.image_url.value: embed.set_image(url=self.image_url.value.strip())
+        if self.note.value: embed.add_field(name="\u200b", value=f"-# {self.note.value.strip()}", inline=False)
+        await interaction.channel.send(content="||@everyone||", embed=embed)
+        await interaction.followup.send("✅ Announcement sent successfully.", ephemeral=True)
+
 # =========================
 # SLASH COMMANDS
 # =========================
@@ -330,7 +339,6 @@ async def setup_v(interaction: discord.Interaction):
 @app_commands.choices(รายการ=[
     app_commands.Choice(name="ปุ่มยืนยันตัวตน", value="verify_btn"),
     app_commands.Choice(name="สถานะยืนยันแล้ว", value="verify_success"),
-    app_commands.Choice(name="สถานะยืนยันไม่สำเร็จ", value="verify_failed"),
     app_commands.Choice(name="หัวข้อ Ticket (❗)", value="ticket_header"),
     app_commands.Choice(name="Ticket: รายงานคนโกง", value="ticket_report"),
     app_commands.Choice(name="Ticket: รับรางวัล", value="ticket_reward"),
@@ -341,9 +349,6 @@ async def setup_v(interaction: discord.Interaction):
     app_commands.Choice(name="ข้อความแจ้งเตือน (Info)", value="info"),
     app_commands.Choice(name="ไอคอนโฟลเดอร์ (Transcript)", value="folder"),
     app_commands.Choice(name="ไอคอนแม่กุญแจ (Close)", value="lock"),
-    app_commands.Choice(name="ไอคอนสำเร็จ (Success)", value="success"),
-    app_commands.Choice(name="ไอคอนผิดพลาด (Error)", value="error"),
-    app_commands.Choice(name="ไอคอนโหลด (Loading)", value="loading"),
 ])
 async def set_emoji(interaction: discord.Interaction, รายการ: app_commands.Choice[str], อีโมจิ: str):
     s = get_guild_settings(interaction.guild_id)
@@ -375,15 +380,12 @@ async def unban_cmd(interaction: discord.Interaction, username: str):
     await interaction.response.defer(ephemeral=True)
     rid, _ = get_roblox_info_by_name(username)
     if not rid: await interaction.followup.send(f"❌ Not found.", ephemeral=True); return
-    
     s = get_guild_settings(interaction.guild_id)
     v_emoji = s["emojis"].get("verify_success", "✅")
-    i_emoji = s["emojis"].get("info", "ℹ️")
-    
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("DELETE FROM bans WHERE roblox_id = ?", (str(rid),))
         if cursor.rowcount > 0: await interaction.followup.send(f"{v_emoji} Successfully unbanned **{username}**.", ephemeral=True)
-        else: await interaction.followup.send(f"{i_emoji} **{username}** is not in the ban list.", ephemeral=True)
+        else: await interaction.followup.send(f"ℹ️ Not in ban list.", ephemeral=True)
 
 @bot.tree.command(name="ปิดticket", description="Close ticket")
 @app_commands.default_permissions(administrator=True)
@@ -391,7 +393,6 @@ async def close_t(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True); s = get_guild_settings(interaction.guild_id); ch = interaction.channel
     f_emoji = s["emojis"].get("folder", "📁")
     l_emoji = s["emojis"].get("lock", "🔒")
-    
     html = f"<html><body><h1>Transcript: {ch.name}</h1>"
     async for m in ch.history(limit=1000, oldest_first=True): html += f"<p><b>{m.author.display_name}</b>: {m.clean_content}</p>"
     html += "</body></html>"
@@ -402,43 +403,33 @@ async def close_t(interaction: discord.Interaction):
     with sqlite3.connect(DB_PATH) as conn: conn.execute("DELETE FROM active_tickets WHERE channel_id = ?", (str(ch.id),))
     await asyncio.sleep(3); await ch.delete()
 
+async def send_ask_more_embed(interaction, text):
+    settings = get_guild_settings(interaction.guild_id)
+    embed = discord.Embed(description=text, color=0x3498DB)
+    if settings.get("ticket_image_url"): embed.set_image(url=settings["ticket_image_url"])
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Sent.", ephemeral=True)
+
 @bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_en", description="Ask for more questions (EN)")
-async def ask_en(interaction: discord.Interaction):
-    s = get_guild_settings(interaction.guild_id)
-    i_emoji = s["emojis"].get("info", "ℹ️")
-    embed = discord.Embed(title=f"{i_emoji} Further Assistance", description="Do you have any further questions? If not, the staff will proceed to close this ticket.", color=0x3498DB)
-    await interaction.response.send_message(embed=embed)
+async def ask_en(interaction: discord.Interaction): await send_ask_more_embed(interaction, "Do you have any further questions? If not, the staff will proceed to close this ticket.")
 
-@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="ส่งข้อความสอบถามเพิ่มเติม (ภาษาไทย)")
-async def ask_th(interaction: discord.Interaction):
-    s = get_guild_settings(interaction.guild_id)
-    i_emoji = s["emojis"].get("info", "ℹ️")
-    embed = discord.Embed(title=f"{i_emoji} สอบถามเพิ่มเติม", description="มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ", color=0x3498DB)
-    await interaction.response.send_message(embed=embed)
+@bot.tree.command(name="มีอะไรสอบถามเพิ่มเติมไหม_th", description="Ask for more questions (TH)")
+async def ask_th(interaction: discord.Interaction): await send_ask_more_embed(interaction, "มีอะไรสอบถามเพิ่มเติมไหมครับ/ค่ะ หากไม่มีแล้วทีมงานขอปิด Ticket นะครับ/ค่ะ")
 
-@bot.tree.command(name="update", description="Send announcement update")
+@bot.tree.command(name="update", description="Send announcement update via modal")
 @app_commands.default_permissions(administrator=True)
-async def update_cmd(interaction: discord.Interaction, message: str):
-    s = get_guild_settings(interaction.guild_id)
-    u_emoji = s["emojis"].get("loading", "⌛")
-    embed = discord.Embed(title=f"{u_emoji} Announcement Update", description=message, color=0xF1C40F, timestamp=datetime.now())
-    await interaction.channel.send(content="@everyone", embed=embed)
-    await interaction.response.send_message("✅ Announcement sent.", ephemeral=True)
+async def update_cmd(interaction: discord.Interaction): await interaction.response.send_modal(UpdateModal())
 
 @bot.tree.command(name="ตั้งค่าห้องtranscript", description="Set transcript channel")
 @app_commands.default_permissions(administrator=True)
 async def set_trans(interaction: discord.Interaction, channel: discord.TextChannel):
-    s = get_guild_settings(interaction.guild_id)
-    s["transcript_channel_id"] = channel.id
-    save_guild_settings(interaction.guild_id, s)
+    s = get_guild_settings(interaction.guild_id); s["transcript_channel_id"] = channel.id; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Transcript channel set to {channel.mention}", ephemeral=True)
 
 @bot.tree.command(name="ตั้งค่าหมวดหมู่ticket", description="Set ticket category")
 @app_commands.default_permissions(administrator=True)
 async def set_cat(interaction: discord.Interaction, category: discord.CategoryChannel):
-    s = get_guild_settings(interaction.guild_id)
-    s["ticket_category_id"] = category.id
-    save_guild_settings(interaction.guild_id, s)
+    s = get_guild_settings(interaction.guild_id); s["ticket_category_id"] = category.id; save_guild_settings(interaction.guild_id, s)
     await interaction.response.send_message(f"✅ Ticket category set to **{category.name}**", ephemeral=True)
 
 @bot.tree.command(name="อื่นๆ", description="ดูคำสั่งเพิ่มเติมอื่นๆ ของระบบ")
@@ -448,7 +439,7 @@ async def others_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title=f"{i_emoji} คำสั่งเพิ่มเติมอื่นๆ", color=0x95A5A6)
     embed.add_field(name="/มีอะไรสอบถามเพิ่มเติมไหม_th", value="ส่งข้อความถามผู้ใช้ใน Ticket (ไทย)", inline=False)
     embed.add_field(name="/มีอะไรสอบถามเพิ่มเติมไหม_en", value="ส่งข้อความถามผู้ใช้ใน Ticket (EN)", inline=False)
-    embed.add_field(name="/update", value="ส่งประกาศแจ้งเตือน @everyone", inline=False)
+    embed.add_field(name="/update", value="ส่งประกาศแจ้งเตือนผ่าน Modal", inline=False)
     embed.add_field(name="/ตั้งค่าห้องtranscript", value="ตั้งค่าห้องเก็บประวัติ Ticket", inline=False)
     embed.add_field(name="/ตั้งค่าหมวดหมู่ticket", value="ตั้งค่าหมวดหมู่สำหรับสร้าง Ticket", inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -460,11 +451,19 @@ async def cust_all(interaction: discord.Interaction):
         gid = discord.ui.TextInput(label="Roblox Group ID", required=False)
         sid = discord.ui.TextInput(label="Staff Role ID", required=False)
         img = discord.ui.TextInput(label="Ticket Image URL", required=False)
+        pfx = discord.ui.TextInput(label="Prefixes (e.g. 1=[P];2=[C];)", style=discord.TextStyle.paragraph, required=False)
+        emoji = discord.ui.TextInput(label="Verified Emoji (e.g. ✅ or <:name:ID>)", required=False)
         async def on_submit(self, interaction: discord.Interaction):
             s = get_guild_settings(interaction.guild_id)
             if self.gid.value: s["roblox_group_id"] = parse_id(self.gid.value)
             if self.sid.value: s["ticket_staff_role_id"] = parse_id(self.sid.value)
             if self.img.value: s["ticket_image_url"] = self.img.value.strip()
+            if self.emoji.value: s["emojis"]["verify_btn"] = self.emoji.value.strip()
+            if self.pfx.value:
+                for item in self.pfx.value.split(";"):
+                    if "=" in item:
+                        k,v = item.split("=", 1)
+                        s["rank_prefixes"][k.strip().lower()] = v.strip()
             save_guild_settings(interaction.guild_id, s); await interaction.response.send_message("✅ Updated.", ephemeral=True)
     await interaction.response.send_modal(CustModal())
 
@@ -476,16 +475,13 @@ async def lifespan(app: FastAPI): init_db(); asyncio.create_task(bot.start(DISCO
 app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def root(): return {"status": "online"}
-
 @app.post("/verify")
 async def verify_ep(request: Request):
     data = await request.json(); rid, rname, gid = data.get("robloxId"), str(data.get("robloxUsername", "")).strip(), data.get("guildId")
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        # ค้นหาด้วย ID (แม่นยำที่สุด)
         row = conn.execute("SELECT discord_id FROM users WHERE roblox_id = ? AND verified = 0", (str(rid),)).fetchone()
-        if not row: # สำรองด้วยชื่อ
-            row = conn.execute("SELECT discord_id FROM users WHERE LOWER(pending_roblox_username) = ? AND verified = 0", (rname.lower(),)).fetchone()
+        if not row: row = conn.execute("SELECT discord_id FROM users WHERE LOWER(pending_roblox_username) = ? AND verified = 0", (rname.lower(),)).fetchone()
     if not row: return {"ok": False, "message": "Verify on Discord first!"}
     dname, rank, err = await update_member_status(row[0], rid, rname, gid)
     if dname:
